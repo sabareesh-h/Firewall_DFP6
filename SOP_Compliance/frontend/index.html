@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Delphi-TVS SOP Compliance Software for Firewall DFP6 Visual Inspection">
+    <title>SOP Compliance Software — Fire Wall DFP6</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <!-- ═══════════ HEADER BAR ═══════════ -->
+    <header id="header">
+        <div class="header-left">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <svg width="36" height="36" viewBox="0 0 36 36">
+                        <circle cx="18" cy="18" r="16" fill="none" stroke="#4fc3f7" stroke-width="2"/>
+                        <path d="M10 18 L18 10 L26 18 L18 26 Z" fill="#4fc3f7" opacity="0.6"/>
+                        <circle cx="18" cy="18" r="5" fill="#fff"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <span class="company-name">Delphi-TVS</span>
+                    <span class="company-sub">Technologies</span>
+                </div>
+            </div>
+        </div>
+        <div class="header-center">
+            <h1>SOP Compliance Software <span class="header-arrow">→</span> Fire Wall DFP6</h1>
+        </div>
+        <div class="header-right">
+            <div class="header-info">
+                <span id="header-date" class="header-date">--</span>
+                <span id="header-time" class="header-time">--:--:--</span>
+            </div>
+            <div class="header-status" id="system-status-indicator">
+                <span class="status-dot online"></span>
+                <span class="status-label">System Online</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══════════ MAIN CONTENT ═══════════ -->
+    <main id="main-content">
+
+        <!-- ──── LEFT SIDEBAR ──── -->
+        <aside class="sidebar sidebar-left">
+
+            <!-- Application / Source Switch -->
+            <section class="card" id="source-switch-card">
+                <div class="card-header">
+                    <span class="card-title">Video Source</span>
+                </div>
+                <div class="card-body source-buttons">
+                    <button class="btn btn-source active" id="btn-video" onclick="switchSource('video')">
+                        Pre-recorded Video
+                    </button>
+                    <button class="btn btn-source" id="btn-live" onclick="switchSource('live')">
+                        Live Camera
+                    </button>
+                    <button class="btn btn-source" id="btn-demo" onclick="switchSource('demo')">
+                        Demo Mode
+                    </button>
+                </div>
+            </section>
+
+            <!-- Production Summary -->
+            <section class="card" id="production-card">
+                <div class="card-header">
+                    <span class="card-title">Production Summary</span>
+                </div>
+                <div class="card-body">
+                    <div class="production-row">
+                        <span class="prod-label">Total Count</span>
+                        <span class="prod-value" id="total-count">0</span>
+                    </div>
+                    <div class="production-row">
+                        <span class="prod-label">Pass Count</span>
+                        <span class="prod-value pass" id="pass-count">0</span>
+                    </div>
+                    <div class="production-row">
+                        <span class="prod-label fail-label">Fail Count</span>
+                        <span class="prod-value fail" id="fail-count">0</span>
+                    </div>
+                    <button class="btn btn-reset-counter" id="btn-reset-counter" onclick="resetCounter()">
+                        ↻ Reset Counter
+                    </button>
+                </div>
+            </section>
+
+            <!-- Connections -->
+            <section class="card" id="connections-card">
+                <div class="card-header">
+                    <span class="card-title">Connections</span>
+                </div>
+                <div class="card-body">
+                    <div class="connection-row">
+                        <span class="conn-label">YOLO Model</span>
+                        <span class="conn-status" id="conn-detector">
+                            <span class="status-dot offline"></span>
+                            <span>Offline</span>
+                        </span>
+                    </div>
+                    <div class="connection-row">
+                        <span class="conn-label">Camera / Video</span>
+                        <span class="conn-status" id="conn-camera">
+                            <span class="status-dot offline"></span>
+                            <span>Offline</span>
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+        </aside>
+
+        <!-- ──── CENTER — CAMERA VIEW ──── -->
+        <section class="center-panel" id="camera-panel">
+            <div class="camera-header">
+                <span class="camera-title">Live Camera View</span>
+                <span class="camera-subtitle" id="camera-mode-label">(PRE-RECORDED VIDEO)</span>
+                <span class="inspection-state-badge" id="inspection-state-label">⏳  Waiting for Part</span>
+                <div class="live-indicator" id="live-dot">
+                    <span class="live-dot-circle"></span>
+                    <span>Live</span>
+                </div>
+            </div>
+            <div class="camera-container">
+                <img id="video-feed" src="/video" alt="Live camera feed" />
+                <div class="camera-overlay" id="camera-overlay" style="display: none;">
+                    <span class="overlay-text">No Feed Available</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ──── RIGHT SIDEBAR ──── -->
+        <aside class="sidebar sidebar-right">
+
+            <!-- Gauge Check Points -->
+            <section class="card gauge-card" id="gauge-card">
+                <div class="card-header">
+                    <span class="card-title">Gauge Check Points</span>
+                    <span class="gauge-counter" id="gauge-counter">(0 / 7)</span>
+                </div>
+                <div class="card-body" id="gauge-list">
+                    <!-- Dynamically populated -->
+                </div>
+            </section>
+
+            <!-- Final Result -->
+            <section class="card result-card" id="result-card">
+                <div class="card-header">
+                    <span class="card-title">Final Result</span>
+                </div>
+                <div class="card-body result-body" id="result-body">
+                    <div class="result-icon" id="result-icon">
+                        <svg class="result-svg" viewBox="0 0 60 60">
+                            <circle cx="30" cy="30" r="26" fill="none" stroke="#666" stroke-width="3" stroke-dasharray="5,5"/>
+                        </svg>
+                    </div>
+                    <div class="result-text">
+                        <span class="result-status" id="result-status">Waiting</span>
+                        <span class="result-detail" id="result-detail">0 / 7 gauges completed</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Reset Button -->
+            <button class="btn btn-reset" id="btn-reset" onclick="resetInspection()">
+                ↻ Reset Inspection
+            </button>
+
+        </aside>
+
+    </main>
+
+    <!-- ═══════════ BOTTOM — RECENT LOGS ═══════════ -->
+    <section class="bottom-panel" id="logs-panel">
+        <div class="logs-header">
+            <span class="logs-title">Recent Top 5 Logs</span>
+        </div>
+        <table class="logs-table" id="logs-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Time</th>
+                    <th>Part ID</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody id="logs-tbody">
+                <tr class="log-empty">
+                    <td colspan="4">No inspection logs yet</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- ═══════════ FOOTER ═══════════ -->
+    <footer id="footer">
+        <span class="footer-company">Delphi-TVS Technologies Limited <span class="footer-sep">|</span> Safer. Greener. Together.</span>
+        <span class="footer-version">Version 1.0.0</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

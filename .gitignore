@@ -1,0 +1,22 @@
+# Videos and Datasets
+*.mp4
+*.zip
+frames/
+frames_2/
+TML Trail 2 with part/
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+env/
+
+# Model Weights
+**/*.pt
+**/*.onnx
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
