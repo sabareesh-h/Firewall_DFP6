@@ -421,6 +421,17 @@ async def reset_counter():
     return JSONResponse({"status": "ok"})
 
 
+class PartNoUpdate(BaseModel):
+    part_no: str
+
+@app.post("/set_part_no")
+async def set_part_no(body: PartNoUpdate):
+    """Set the part number from the barcode scanner."""
+    if validator:
+        validator.set_part_no(body.part_no)
+    return JSONResponse({"status": "ok"})
+
+
 class ConfidenceToggle(BaseModel):
     show: bool
 
@@ -492,6 +503,7 @@ async def websocket_video_endpoint(ws: WebSocket):
 
 # ─── Static Files ─────────────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=config.FRONTEND_DIR), name="static")
+app.mount("/reference_images", StaticFiles(directory=os.path.join(config.BASE_DIR, "Reference_gauge_images")), name="reference_images")
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

@@ -763,23 +763,6 @@ body {
     flex-shrink: 0;
 }
 
-.gauge-thumb {
-    width: 30px;
-    height: 30px;
-    border-radius: 4px;
-    background: #f1f5f9;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border: 1px solid #e2e8f0;
-}
-
-.gauge-thumb svg {
-    color: var(--text-muted);
-}
-
 .gauge-name {
     flex: 1;
     font-size: 12px;
@@ -796,54 +779,32 @@ body {
     color: var(--text-muted);
 }
 
-.gauge-status-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.2px;
-    flex-shrink: 0;
-    white-space: nowrap;
-}
-
 /* Gauge status variants — light mode */
 .gauge-item[data-status="OK"] {
-    border-color: rgba(22, 163, 74, 0.25);
-    background: rgba(22, 163, 74, 0.04);
+    border-color: #15803d;
+    background: #16a34a;
 }
-.gauge-item[data-status="OK"] .gauge-status-badge {
-    background: var(--status-ok-bg);
-    color: var(--status-ok);
-    border: 1px solid var(--status-ok-border);
-}
-.gauge-item[data-status="OK"] .gauge-num {
-    background: var(--status-ok);
+.gauge-item[data-status="OK"] .gauge-name {
     color: #fff;
 }
-
-.gauge-item[data-status="NOT_CHECKED"] {
-    border-color: #e2e8f0;
-}
-.gauge-item[data-status="NOT_CHECKED"] .gauge-status-badge {
-    background: var(--status-pending-bg);
-    color: var(--status-pending);
-    border: 1px solid #d1d5db;
-}
-.gauge-item[data-status="NOT_CHECKED"] .gauge-num {
-    background: #e2e8f0;
-    color: var(--text-muted);
+.gauge-item[data-status="OK"] .gauge-num {
+    background: #fff;
+    color: #16a34a;
 }
 
-.gauge-item[data-status="PENDING"] .gauge-status-badge {
-    background: var(--status-pending-bg);
-    color: var(--status-pending);
+.gauge-item[data-status="NOT_CHECKED"],
+.gauge-item[data-status="UNCERTAIN"] {
+    border-color: #d97706;
+    background: #f59e0b;
 }
-
-.gauge-status-icon {
-    font-size: 13px;
+.gauge-item[data-status="NOT_CHECKED"] .gauge-name,
+.gauge-item[data-status="UNCERTAIN"] .gauge-name {
+    color: #fff;
+}
+.gauge-item[data-status="NOT_CHECKED"] .gauge-num,
+.gauge-item[data-status="UNCERTAIN"] .gauge-num {
+    background: #fff;
+    color: #f59e0b;
 }
 
 /* ─── Final Result ────────────────────────────────────────────── */

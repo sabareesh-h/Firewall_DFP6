@@ -52,18 +52,13 @@
         <!-- Left: Logo -->
         <div class="header-left">
             <div class="logo-area">
-                <div class="logo-icon">
-                    <svg width="36" height="36" viewBox="0 0 36 36">
-                        <circle cx="18" cy="18" r="16" fill="none" stroke="#4fc3f7" stroke-width="2"/>
-                        <path d="M10 18 L18 10 L26 18 L18 26 Z" fill="#4fc3f7" opacity="0.6"/>
-                        <circle cx="18" cy="18" r="5" fill="#fff"/>
-                    </svg>
-                </div>
-                <div class="logo-text">
-                    <span class="company-name">DelphiTVS</span>
-                    <span class="company-sub">Technologies</span>
-                </div>
+                <img src="/reference_images/Logo.png" alt="Delphi - TVS Technologies" style="height: 46px; object-fit: contain; margin-left: 10px;">
             </div>
+            <select id="header-source-select" onchange="switchSource(this.value)" style="margin-left: 15px; padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-size: 13px; font-weight: 600; outline: none; cursor: pointer;">
+                <option value="live" style="color: #333;">Live Camera</option>
+                <option value="video" selected style="color: #333;">Pre-recorded Video</option>
+                <option value="demo" style="color: #333;">Demo Mode</option>
+            </select>
         </div>
 
         <!-- Center: Title -->
@@ -132,33 +127,20 @@
         <!-- ──── LEFT SIDEBAR ──── -->
         <aside class="sidebar sidebar-left">
 
-            <!-- Video Source -->
-            <section class="card" id="source-switch-card">
+            <!-- Video Source section moved to header -->
+
+            <!-- Part Number (Scanner) -->
+            <section class="card" id="part-no-card">
                 <div class="card-header">
                     <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                        <path d="M4 5h2v14H4zm6 0h2v14h-2zm6 0h2v14h-2zm4 0h2v14h-2z"/>
                     </svg>
-                    <span class="card-title">Video Source</span>
+                    <span class="card-title">Part No.</span>
                 </div>
-                <div class="card-body source-buttons">
-                    <button class="btn btn-source" id="btn-live" onclick="switchSource('live')">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-                        </svg>
-                        Live Camera
-                    </button>
-                    <button class="btn btn-source active" id="btn-video" onclick="switchSource('video')">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
-                        </svg>
-                        Pre-recorded Video
-                    </button>
-                    <button class="btn btn-source" id="btn-demo" onclick="switchSource('demo')">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                        </svg>
-                        Demo Mode
-                    </button>
+                <div class="card-body">
+                    <div style="font-size: 18px; font-weight: 800; color: var(--primary-700); text-align: center; padding: 10px 0; word-break: break-all;" id="scanned-part-no">
+                        --
+                    </div>
                 </div>
             </section>
 
@@ -353,10 +335,10 @@
         <table class="logs-table" id="logs-table">
             <thead>
                 <tr>
-                    <th>#</th>
-                    <th>Time</th>
+                    <th>Time Checked</th>
                     <th>Part ID</th>
                     <th>Result</th>
+                    <th>Cycle Time</th>
                 </tr>
             </thead>
             <tbody id="logs-tbody">
@@ -369,10 +351,10 @@
 
     <!-- ═══════════ FOOTER ═══════════ -->
     <footer id="footer">
-        <span class="footer-company">Delphi-TVS Technologies Limited <span class="footer-sep">|</span> Safer. Greener. Together.</span>
+        <span class="footer-company">Delphi-TVS Technologies Limited <span class="footer-sep">|</span> Tomorrow's Engineering Today</span>
         <span class="footer-version">Version 1.0.0</span>
     </footer>
 
-    <script src="/static/app.js?v=5"></script>
+    <script src="/static/app.js?v=8"></script>
 </body>
 </html>

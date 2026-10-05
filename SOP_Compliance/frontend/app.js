@@ -254,20 +254,15 @@ function initGaugeList() {
         item.id = `gauge-item-${id}`;
         item.setAttribute('data-status', 'NOT_CHECKED');
 
+        const imageName = name === 'Distance' ? 'Distance.png' : `${name} Gauge.png`;
+        const imageHtml = `<img src="/reference_images/${imageName}" alt="${name} Gauge" style="max-height: 24px; max-width: 36px; object-fit: contain;" />`;
+
         item.innerHTML = `
-            <span class="gauge-num">${id}</span>
-            <span class="gauge-thumb">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>
-                </svg>
-            </span>
-            <div style="flex:1;min-width:0;">
-                <div class="gauge-name">${name}</div>
+            <span class="gauge-num" style="width: 24px; height: 24px; font-size: 12px; flex-shrink: 0;">${id}</span>
+            <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
+                ${imageHtml}
             </div>
-            <span class="gauge-status-badge">
-                <span class="gauge-status-icon">✗</span>
-                <span class="gauge-status-text">Not Checked</span>
-            </span>
+            <div class="gauge-name" style="font-size: 14px; font-weight: 700; flex-shrink: 0; text-align: right;">${name}</div>
         `;
 
         container.appendChild(item);
@@ -285,46 +280,16 @@ function updateGauges(gauges) {
 
         const status = gauge.status;
         const dwell = gauge.dwell_progress || 0;  // 0.0 to 1.0
-        const displayStatus = (status === 'OK') ? 'OK' : 'NOT_CHECKED';
-        item.setAttribute('data-status', displayStatus);
-
-        const iconEl = item.querySelector('.gauge-status-icon');
-        const textEl = item.querySelector('.gauge-status-text');
-        const thumbEl = item.querySelector('.gauge-thumb');
-
+        
+        let displayStatus = 'NOT_CHECKED';
         if (status === 'OK') {
+            displayStatus = 'OK';
             completed++;
-            iconEl.textContent = '✓';
-            textEl.textContent = 'Checked';
-            if (thumbEl) thumbEl.innerHTML = `
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2">
-                    <circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-5"/>
-                </svg>`;
         } else if (dwell > 0 && status === 'UNCERTAIN') {
-            // Actively being held — show progress ring
-            const pct = Math.round(dwell * 100);
-            const radius = 9;
-            const circ = 2 * Math.PI * radius;
-            const dashOffset = circ * (1 - dwell);
-            iconEl.textContent = '⏱';
-            textEl.textContent = `Hold... ${pct}%`;
-            if (thumbEl) thumbEl.innerHTML = `
-                <svg width="22" height="22" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="${radius}" fill="none" stroke="#e2e8f0" stroke-width="2.5"/>
-                    <circle cx="12" cy="12" r="${radius}" fill="none" stroke="#f59e0b" stroke-width="2.5"
-                        stroke-dasharray="${circ.toFixed(2)}"
-                        stroke-dashoffset="${dashOffset.toFixed(2)}"
-                        stroke-linecap="round"
-                        transform="rotate(-90 12 12)"/>
-                </svg>`;
-        } else {
-            iconEl.textContent = '✗';
-            textEl.textContent = 'Not Checked';
-            if (thumbEl) thumbEl.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>
-                </svg>`;
+            displayStatus = 'UNCERTAIN';
         }
+        
+        item.setAttribute('data-status', displayStatus);
     }
 
     // Update counter
@@ -508,7 +473,6 @@ function updateLogs(logs) {
 
         return `
             <tr>
-                <td>${index + 1}</td>
                 <td>${log.time}</td>
                 <td>${log.part_id}</td>
                 <td>
@@ -517,6 +481,7 @@ function updateLogs(logs) {
                         ${log.result}
                     </span>
                 </td>
+                <td>${log.cycle_time || '--'}</td>
             </tr>
         `;
     }).join('');
@@ -549,13 +514,9 @@ async function switchSource(mode) {
 }
 
 function updateSourceButtons(mode) {
-    document.querySelectorAll('.btn-source').forEach(btn => {
-        btn.classList.remove('active');
-    });
-
-    const activeBtn = document.getElementById(`btn-${mode}`);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
+    const select = document.getElementById('header-source-select');
+    if (select) {
+        select.value = mode;
     }
 }
 
@@ -612,3 +573,43 @@ async function toggleConfidence() {
     }
 }
 
+// ─── Barcode Scanner ────────────────────────────────────────────────────────
+let barcodeBuffer = '';
+let lastKeyTime = 0;
+
+document.addEventListener('keydown', (e) => {
+    // Ignore if user is manually typing in an input field
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    const currentTime = new Date().getTime();
+    
+    // Most hardware scanners act as a keyboard and emit keys very rapidly
+    if (currentTime - lastKeyTime > 100) {
+        barcodeBuffer = ''; // Reset buffer if more than 100ms passed between keystrokes
+    }
+    
+    if (e.key === 'Enter') {
+        if (barcodeBuffer.length > 0) {
+            handleBarcodeScanned(barcodeBuffer);
+            barcodeBuffer = '';
+        }
+    } else if (e.key.length === 1) { // Normal printable character
+        barcodeBuffer += e.key;
+    }
+    
+    lastKeyTime = currentTime;
+});
+
+function handleBarcodeScanned(code) {
+    console.log("Scanned part number:", code);
+    const partNoEl = document.getElementById('scanned-part-no');
+    if (partNoEl) {
+        partNoEl.textContent = code;
+        // Send to backend
+        fetch('/set_part_no', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ part_no: code })
+        }).catch(err => console.error("Failed to set part no:", err));
+    }
+}

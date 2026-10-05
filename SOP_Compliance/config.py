@@ -183,5 +183,5 @@ TARGET_FPS = 30
 APP_TITLE = "SOP Compliance Software"
 APP_MODEL = "Fire Wall DFP6"
 COMPANY_NAME = "Delphi-TVS Technologies Limited"
-COMPANY_TAGLINE = "Safer. Greener. Together."
+COMPANY_TAGLINE = "Tomorrow's Engineering Today"
 APP_VERSION = "1.0.0"

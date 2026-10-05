@@ -87,7 +87,8 @@ class InspectionLog:
     log_id: int
     timestamp: str
     part_id: str
-    result: str                 # "OK" or "NG"
+    result: str                 # "OK" or "Not checked ..."
+    cycle_time: str
 
 
 # ─── Validator ───────────────────────────────────────────────────────────────
@@ -139,6 +140,9 @@ class GaugeValidator:
         self.fail_count = 0
         self.recent_logs: List[InspectionLog] = []
         self._log_counter = 0
+        
+        self.scanned_part_no: Optional[str] = None
+        self._session_start_time: float = 0.0
 
         # Safety logic
         self._hand_interaction_frames = 0
@@ -146,6 +150,9 @@ class GaugeValidator:
 
         # Part memory (for occlusion handling)
         self._last_known_parts: Dict[str, List[int]] = {}
+
+    def set_part_no(self, part_no: str):
+        self.scanned_part_no = part_no
 
     # ─── Public API ──────────────────────────────────────────────────────
 
@@ -241,6 +248,7 @@ class GaugeValidator:
                 if self._part_present_frames >= 5:   # 5 frames to confirm arrival
                     self.inspection_state = InspectionState.INSPECTING
                     self._reset_checkpoints()
+                    self._session_start_time = time.time()
                     logger.info("TML Part detected — inspection session started.")
 
         else:
@@ -558,6 +566,7 @@ class GaugeValidator:
                     "time": log.timestamp,
                     "part_id": log.part_id,
                     "result": log.result,
+                    "cycle_time": log.cycle_time,
                 }
                 for log in self.recent_logs[-5:]
             ],
@@ -584,14 +593,31 @@ class GaugeValidator:
         else:
             self.fail_count += 1
 
+        cycle_time = 0.0
+        if self._session_start_time > 0.0:
+            cycle_time = time.time() - self._session_start_time
+
+        part_id = self.scanned_part_no if self.scanned_part_no else f"FWDPF6-{self.total_count:06d}"
+
+        if result == "NG":
+            missing = [cp.name for cp in self.checkpoints.values() if cp.status != GaugeStatus.OK]
+            if missing:
+                result_str = f"Not checked: {', '.join(missing)}"
+            else:
+                result_str = "NG"
+        else:
+            result_str = "OK"
+
         log = InspectionLog(
             log_id=self._log_counter,
             timestamp=datetime.now().strftime("%H:%M:%S"),
-            part_id=f"FWDPF6-{self.total_count:06d}",
-            result=result,
+            part_id=part_id,
+            result=result_str,
+            cycle_time=f"{cycle_time:.1f}s",
         )
         self.recent_logs.append(log)
         if len(self.recent_logs) > 50:
             self.recent_logs = self.recent_logs[-50:]
 
-        logger.info(f"Inspection logged: {log.part_id} → {result}")
+        self.scanned_part_no = None
+        logger.info(f"Inspection logged: {log.part_id} → {result_str} (Cycle: {log.cycle_time})")
