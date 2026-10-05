@@ -7,12 +7,49 @@
     <title>SOP Compliance Software — Fire Wall DFP6</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 
+    <!-- Safety Warning Banner (fixed, page-level, not clipped by any container) -->
+    <div id="safety-warning-overlay" style="
+        display: none;
+        position: fixed;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(220, 38, 38, 0.97);
+        color: white;
+        padding: 14px 28px;
+        border-radius: 10px;
+        font-weight: 800;
+        font-size: 14px;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 6px 30px rgba(0,0,0,0.6);
+        z-index: 9999;
+        align-items: center;
+        gap: 12px;
+        border: 2px solid rgba(255,255,255,0.4);
+        letter-spacing: 0.3px;
+        animation: safetyPulse 1s ease-in-out infinite;
+    ">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        ⚠️ SAFETY: Use gloves when handling the part!
+    </div>
+    <style>
+        @keyframes safetyPulse {
+            0%, 100% { box-shadow: 0 6px 30px rgba(220,38,38,0.6); }
+            50% { box-shadow: 0 6px 40px rgba(220,38,38,0.9), 0 0 0 6px rgba(220,38,38,0.2); }
+        }
+    </style>
+
     <!-- ═══════════ HEADER BAR ═══════════ -->
+
     <header id="header">
+        <!-- Left: Logo -->
         <div class="header-left">
             <div class="logo-area">
                 <div class="logo-icon">
@@ -23,22 +60,68 @@
                     </svg>
                 </div>
                 <div class="logo-text">
-                    <span class="company-name">Delphi-TVS</span>
+                    <span class="company-name">DelphiTVS</span>
                     <span class="company-sub">Technologies</span>
                 </div>
             </div>
         </div>
+
+        <!-- Center: Title -->
         <div class="header-center">
-            <h1>SOP Compliance Software <span class="header-arrow">→</span> Fire Wall DFP6</h1>
-        </div>
-        <div class="header-right">
-            <div class="header-info">
-                <span id="header-date" class="header-date">--</span>
-                <span id="header-time" class="header-time">--:--:--</span>
+            <div class="header-title-block">
+                <span class="header-title-main">SOP COMPLIANCE SOFTWARE</span>
+                <span class="header-title-sub">Vision Quality Systems</span>
             </div>
-            <div class="header-status" id="system-status-indicator">
-                <span class="status-dot online"></span>
-                <span class="status-label">System Online</span>
+            <div class="header-divider"></div>
+            <div class="header-app-block">
+                <svg class="header-gear" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <span class="header-app-name">FIRE WALL DFP6</span>
+                <svg class="header-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="6 9 12 15 18 9"/>
+                </svg>
+            </div>
+            <div class="header-divider"></div>
+            <div class="header-dept-block">
+                <span class="header-dept-label">Nozzle Department</span>
+            </div>
+        </div>
+
+        <!-- Right: Date, Time, Status -->
+        <div class="header-right">
+            <div class="header-datetime">
+                <div class="header-date-wrap">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                    </svg>
+                    <span id="header-date" class="header-date">--</span>
+                </div>
+                <div class="header-time-wrap">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <span id="header-time" class="header-time">--:--:--</span>
+                </div>
+            </div>
+            <div class="header-status-group">
+                <div class="header-status" id="system-status-indicator">
+                    <span class="status-dot online"></span>
+                    <span class="status-label">System Online</span>
+                </div>
+                <div class="header-sub-statuses">
+                    <span class="sub-status-item">
+                        <span class="status-dot online"></span>
+                        <span class="sub-status-label">Camera: </span>
+                        <span id="header-camera-status" class="sub-status-value">Online</span>
+                    </span>
+                    <span class="sub-status-sep">|</span>
+                    <span class="sub-status-item">
+                        <span class="status-dot online"></span>
+                        <span class="sub-status-label">YOLO: </span>
+                        <span id="header-yolo-status" class="sub-status-value">Online</span>
+                    </span>
+                </div>
             </div>
         </div>
     </header>
@@ -49,19 +132,31 @@
         <!-- ──── LEFT SIDEBAR ──── -->
         <aside class="sidebar sidebar-left">
 
-            <!-- Application / Source Switch -->
+            <!-- Video Source -->
             <section class="card" id="source-switch-card">
                 <div class="card-header">
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
                     <span class="card-title">Video Source</span>
                 </div>
                 <div class="card-body source-buttons">
-                    <button class="btn btn-source active" id="btn-video" onclick="switchSource('video')">
-                        Pre-recorded Video
-                    </button>
                     <button class="btn btn-source" id="btn-live" onclick="switchSource('live')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                        </svg>
                         Live Camera
                     </button>
+                    <button class="btn btn-source active" id="btn-video" onclick="switchSource('video')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
+                        </svg>
+                        Pre-recorded Video
+                    </button>
                     <button class="btn btn-source" id="btn-demo" onclick="switchSource('demo')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                        </svg>
                         Demo Mode
                     </button>
                 </div>
@@ -70,20 +165,25 @@
             <!-- Production Summary -->
             <section class="card" id="production-card">
                 <div class="card-header">
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+                    </svg>
                     <span class="card-title">Production Summary</span>
                 </div>
                 <div class="card-body">
-                    <div class="production-row">
-                        <span class="prod-label">Total Count</span>
-                        <span class="prod-value" id="total-count">0</span>
-                    </div>
-                    <div class="production-row">
-                        <span class="prod-label">Pass Count</span>
-                        <span class="prod-value pass" id="pass-count">0</span>
-                    </div>
-                    <div class="production-row">
-                        <span class="prod-label fail-label">Fail Count</span>
-                        <span class="prod-value fail" id="fail-count">0</span>
+                    <div class="production-stats">
+                        <div class="prod-stat-item">
+                            <span class="prod-label">Total Count</span>
+                            <span class="prod-value" id="total-count">0</span>
+                        </div>
+                        <div class="prod-stat-item">
+                            <span class="prod-label">Pass Count</span>
+                            <span class="prod-value pass" id="pass-count">0</span>
+                        </div>
+                        <div class="prod-stat-item fail-item">
+                            <span class="prod-label fail-label">Fail Count</span>
+                            <span class="prod-value fail" id="fail-count">0</span>
+                        </div>
                     </div>
                     <button class="btn btn-reset-counter" id="btn-reset-counter" onclick="resetCounter()">
                         ↻ Reset Counter
@@ -91,25 +191,63 @@
                 </div>
             </section>
 
-            <!-- Connections -->
+            <!-- Connection Status -->
             <section class="card" id="connections-card">
                 <div class="card-header">
-                    <span class="card-title">Connections</span>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                    </svg>
+                    <span class="card-title">Connection Status</span>
                 </div>
                 <div class="card-body">
                     <div class="connection-row">
-                        <span class="conn-label">YOLO Model</span>
+                        <div class="conn-left">
+                            <span class="conn-num">1</span>
+                            <span class="conn-label">YOLO Model</span>
+                        </div>
                         <span class="conn-status" id="conn-detector">
                             <span class="status-dot offline"></span>
                             <span>Offline</span>
                         </span>
                     </div>
                     <div class="connection-row">
-                        <span class="conn-label">Camera / Video</span>
+                        <div class="conn-left">
+                            <span class="conn-num">1</span>
+                            <span class="conn-label">Camera / Video</span>
+                        </div>
                         <span class="conn-status" id="conn-camera">
                             <span class="status-dot offline"></span>
                             <span>Offline</span>
                         </span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Current Application -->
+            <section class="card" id="app-info-card">
+                <div class="card-header">
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span class="card-title">Current Application</span>
+                </div>
+                <div class="card-body app-info-body">
+                    <div class="app-select-row">
+                        <select class="app-select" id="app-select">
+                            <option>FIRE WALL DFP6</option>
+                        </select>
+                    </div>
+                    <div class="app-detail-row">
+                        <span class="app-detail-label">Model</span>
+                        <span class="app-detail-value">DFP6</span>
+                    </div>
+                    <div class="app-detail-row">
+                        <span class="app-detail-label">Department</span>
+                        <span class="app-detail-value">Nozzle</span>
+                    </div>
+                    <div class="app-detail-row">
+                        <span class="app-detail-label">Version</span>
+                        <span class="app-detail-value">v1.0.0</span>
                     </div>
                 </div>
             </section>
@@ -119,16 +257,33 @@
         <!-- ──── CENTER — CAMERA VIEW ──── -->
         <section class="center-panel" id="camera-panel">
             <div class="camera-header">
+                <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
                 <span class="camera-title">Live Camera View</span>
-                <span class="camera-subtitle" id="camera-mode-label">(PRE-RECORDED VIDEO)</span>
-                <span class="inspection-state-badge" id="inspection-state-label">⏳  Waiting for Part</span>
                 <div class="live-indicator" id="live-dot">
                     <span class="live-dot-circle"></span>
                     <span>Live</span>
                 </div>
+                <span class="inspection-state-badge" id="inspection-state-label">⏳ Waiting for Part</span>
+                <span class="camera-subtitle" id="camera-mode-label">(PRE-RECORDED VIDEO)</span>
+                
+                <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+                    <label for="conf-toggle" style="font-size: 0.8rem; color: #a0aabf; font-weight: 500;">Show Confidence</label>
+                    <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                        <input type="checkbox" id="conf-toggle" onchange="toggleConfidence()" style="opacity: 0; width: 0; height: 0;">
+                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #3b4252; transition: .4s; border-radius: 34px;"></span>
+                        <!-- inline CSS for simplicity to avoid huge css changes -->
+                        <style>
+                            #conf-toggle:checked + .slider { background-color: #2196F3; }
+                            .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+                            #conf-toggle:checked + .slider:before { transform: translateX(14px); }
+                        </style>
+                    </label>
+                </div>
             </div>
             <div class="camera-container">
-                <img id="video-feed" src="/video" alt="Live camera feed" />
+                <canvas id="video-canvas" width="960" height="540"></canvas>
                 <div class="camera-overlay" id="camera-overlay" style="display: none;">
                     <span class="overlay-text">No Feed Available</span>
                 </div>
@@ -141,8 +296,14 @@
             <!-- Gauge Check Points -->
             <section class="card gauge-card" id="gauge-card">
                 <div class="card-header">
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
                     <span class="card-title">Gauge Check Points</span>
-                    <span class="gauge-counter" id="gauge-counter">(0 / 7)</span>
+                    <span class="gauge-counter" id="gauge-counter">0 / 7 Completed</span>
+                </div>
+                <div class="gauge-progress-bar">
+                    <div class="gauge-progress-fill" id="gauge-progress-fill" style="width: 0%"></div>
                 </div>
                 <div class="card-body" id="gauge-list">
                     <!-- Dynamically populated -->
@@ -152,6 +313,9 @@
             <!-- Final Result -->
             <section class="card result-card" id="result-card">
                 <div class="card-header">
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
                     <span class="card-title">Final Result</span>
                 </div>
                 <div class="card-body result-body" id="result-body">
@@ -165,12 +329,13 @@
                         <span class="result-detail" id="result-detail">0 / 7 gauges completed</span>
                     </div>
                 </div>
+                <!-- Reset Button inside result card -->
+                <div class="result-footer">
+                    <button class="btn btn-reset" id="btn-reset" onclick="resetInspection()">
+                        ↻ Reset Inspection
+                    </button>
+                </div>
             </section>
-
-            <!-- Reset Button -->
-            <button class="btn btn-reset" id="btn-reset" onclick="resetInspection()">
-                ↻ Reset Inspection
-            </button>
 
         </aside>
 
@@ -179,7 +344,11 @@
     <!-- ═══════════ BOTTOM — RECENT LOGS ═══════════ -->
     <section class="bottom-panel" id="logs-panel">
         <div class="logs-header">
-            <span class="logs-title">Recent Top 5 Logs</span>
+            <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <span class="logs-title">Recent Inspection Logs</span>
+            <a href="#" class="logs-view-all">View All →</a>
         </div>
         <table class="logs-table" id="logs-table">
             <thead>
@@ -204,6 +373,6 @@
         <span class="footer-version">Version 1.0.0</span>
     </footer>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=5"></script>
 </body>
 </html>

@@ -7,61 +7,73 @@ import os
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "models", "dfp6.pt")
+MODEL_PATH = os.path.join(BASE_DIR, "models", "best_v2.pt")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 # Default video file for testing
-DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-18 153923.mp4"
-
-# RTSP Stream URL for Hikvision / CCTV Cameras
-# Example: rtsp://username:password@192.168.1.66:554/Streaming/Channels/101
-LIVE_CAMERA_URL = ""
+DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-24 155434.mp4"
+# Hikvision Camera URL
+# RTSP (raw stream):  rtsp://admin:Wedit@2024@192.168.1.66:554/Streaming/Channels/101
+# HTTP (browser-like): http://admin:Wedit@2024@192.168.1.66/Streaming/Channels/101/httppreview
+LIVE_CAMERA_URL = "rtsp://admin:Wedit@2024@192.168.1.66:554/Streaming/Channels/101"
 
 
 # ─── YOLO Settings ───────────────────────────────────────────────────────────
-CONFIDENCE_THRESHOLD = 0.25
-IOU_THRESHOLD = 0.45
-IMGSZ = 1280
+CONFIDENCE_THRESHOLD = 0.10
+IOU_THRESHOLD = 0.15
+IMGSZ = 1024         # Must match what model was trained/predicted with
+DEVICE = "0"         # "0" = GPU (CUDA device 0). Change to "cpu" if no GPU.
+
+# Live-camera inference — same imgsz as training (must match)
+LIVE_IMGSZ = 1024
+
+# TensorRT compiled engine path (optional, created by export_tensorrt.py).
+# If this file exists the detector will load it instead of best.pt and
+# inference will be 3–5× faster with identical accuracy.
+MODEL_ENGINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "best.engine")
 
 # ─── Class Definitions ───────────────────────────────────────────────────────
 # Gauge classes (things the operator holds / uses)
 GAUGE_CLASSES = {
     0: "Distance",
-    1: "Pin Gauge",
-    2: "Dia Gauge",
-    3: "M8 Thread",
-    4: "M6 Thread",
-    5: "13mm Gauge",
+    1: "Pin",
+    2: "Dia",
+    3: "M6",
+    4: "M8",
+    5: "13mm",
+    14: "11mm"
 }
 
 # Part classes (areas on the physical part being inspected)
 PART_CLASSES = {
-    6: "Drive Shaft Thread",
-    7: "Bracket Hole Top",
+    6: "DS Thread",
+    7: "Top",
     8: "Bracket Hole Side",
     9: "Pin Check",
-    10: "Hydraulic Head",
-    11: "Inlet Hole",
-    12: "Outlet Hole",
-    13: "TML Part",
+    11: "In",
+    12: "Out",
+    13: "Part",
+    15: "Hand"
 }
 
 # All class names by ID
 CLASS_NAMES = {
     0: "Distance",
-    1: "Pin Gauge",
-    2: "Dia Gauge",
-    3: "M8 Thread",
-    4: "M6 Thread",
-    5: "13mm Gauge",
-    6: "Drive Shaft Thread",
-    7: "Bracket Hole Top",
+    1: "Pin",
+    2: "Dia",
+    3: "M6",
+    4: "M8",
+    5: "13mm",
+    6: "DS Thread",
+    7: "Top",
     8: "Bracket Hole Side",
     9: "Pin Check",
-    10: "Hydraulic Head",
-    11: "Inlet Hole",
-    12: "Outlet Hole",
-    13: "TML Part",
+    10: "HH",
+    11: "In",
+    12: "Out",
+    13: "Part",
+    14: "11mm",
+    15: "Hand"
 }
 
 # ─── Gauge Validation Rules ──────────────────────────────────────────────────
@@ -83,64 +95,65 @@ GAUGE_CHECKPOINTS = [
         "id": 1,
         "name": "Distance Gauge",
         "gauge_class": "Distance",
-        "part_class": "TML Part",
-        "method": "intersects",       # TEMP: any bbox overlap → OK
-        "description": "Distance gauge overlapping TML Part",
+        "part_class": "Part",
+        "method": "fully_inside",   # Gauge bbox must be entirely within Part bbox
+        "description": "Distance gauge fully inside TML Part",
     },
     {
         "id": 2,
         "name": "Pin Gauge",
-        "gauge_class": "Pin Gauge",
-        "part_class": "TML Part",
+        "gauge_class": "Pin",
+        "part_class": "DS Thread",
         "method": "intersects",
-        "description": "Pin Gauge overlapping TML Part",
+        "description": "Pin Gauge overlapping DS Thread",
     },
     {
         "id": 3,
         "name": "Dia Gauge",
-        "gauge_class": "Dia Gauge",
-        "part_class": "TML Part",
-        "method": "intersects",
-        "description": "Dia Gauge overlapping TML Part",
+        "gauge_class": "Dia",
+        "part_class": "DS Thread",
+        "method": "near",
+        "description": "Dia Gauge near DS Thread",
     },
     {
         "id": 4,
-        "name": "M8 Thread",
-        "gauge_class": "M8 Thread",
-        "part_class": "TML Part",
-        "method": "intersects",
-        "description": "M8 Thread overlapping TML Part",
+        "name": "M6 Thread",
+        "gauge_class": "M6",
+        "part_class": "Top",
+        "method": "near",
+        "description": "M6 Thread near Hole Top",
     },
     {
         "id": 5,
-        "name": "M6 Thread",
-        "gauge_class": "M6 Thread",
-        "part_class": "TML Part",
-        "method": "intersects",
-        "description": "M6 Thread overlapping TML Part",
+        "name": "M8 Thread",
+        "gauge_class": "M8",
+        "part_class": "Top",
+        "method": "near",
+        "description": "M8 Thread near Hole Top",
     },
     {
         "id": 6,
-        "name": "Hydraulic Head",
-        "gauge_class": None,
-        "part_class": "Hydraulic Head",       # Looks specifically for Hydraulic Head
-        "method": "exists",
-        "description": "Hydraulic Head identified",
+        "name": "11mm Gauge",
+        "gauge_class": "11mm",
+        "part_class": "Out",
+        "method": "intersects",
+        "description": "11mm Gauge overlapping Outlet",
     },
     {
         "id": 7,
         "name": "13mm Gauge",
-        "gauge_class": "13mm Gauge",
-        "part_class": "TML Part",
+        "gauge_class": "13mm",
+        "part_class": "In",
         "method": "intersects",
-        "description": "13mm Gauge overlapping TML Part",
+        "description": "13mm Gauge overlapping Inlet",
     },
 ]
 
 # ─── Validation Thresholds ───────────────────────────────────────────────────
 OVERLAP_THRESHOLD = 0.15          # Minimum IoU for "intersects" / "overlap" method
-NEAR_DISTANCE_THRESHOLD = 150    # Max pixel distance for "near" method
-OK_HOLD_FRAMES = 3               # Consecutive OK frames needed to latch a gauge as checked
+NEAR_DISTANCE_THRESHOLD = 50    # Max pixel distance for "near" method
+OK_HOLD_FRAMES = 3               # Consecutive OK frames needed to latch a gauge as checked (kept for fallback)
+OK_HOLD_SECONDS = 0.1            # Seconds gauge must stay valid on part before latching as checked
 
 # ─── Part-Presence State Machine ─────────────────────────────────────────────
 # When a gauge disappears from frame (operator moves it to the next spot),

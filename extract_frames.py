@@ -99,7 +99,7 @@ def extract_frames(video_path, output_dir, mode="all", step=1, fps_target=None, 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract and reduce video frames while preserving all movements.")
-    parser.add_argument("--video", type=str, default="TML.mp4", help="Path to input video file")
+    parser.add_argument("--video", type=str, default=r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-29 110701.mp4", help="Path to input video file")
     parser.add_argument("--output", type=str, default="frames", help="Output directory for saved frames")
     parser.add_argument("--prefix", type=str, default="frame", help="Prefix for saved frame image filenames")
     parser.add_argument("--mode", type=str, choices=["all", "step", "motion"], default="motion", 

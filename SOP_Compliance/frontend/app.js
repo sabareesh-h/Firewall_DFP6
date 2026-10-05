@@ -13,20 +13,22 @@
 
 // ─── State ──────────────────────────────────────────────────────────────────
 let ws = null;
+let wsVideo = null;
 let reconnectAttempts = 0;
+let videoReconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 50;
 const RECONNECT_DELAY_MS = 2000;
 let currentSource = 'video';
 
 // ─── Gauge Definitions (must match config.py GAUGE_CHECKPOINTS) ─────────
 const GAUGE_NAMES = {
-    1: 'Distance Gauge',
-    2: 'Pin Gauge',
-    3: 'Dia Gauge',
-    4: 'M8 Thread',
-    5: 'M6 Thread',
-    6: 'Hydraulic Head',
-    7: '13mm Gauge',
+    1: 'Distance',
+    2: 'Pin',
+    3: 'Dia',
+    4: 'M6',
+    5: 'M8',
+    6: '11mm',
+    7: '13mm',
 };
 
 // ─── Initialize ─────────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initClock();
     initGaugeList();
     connectWebSocket();
+    connectVideoWebSocket();
 
     // Fallback: poll status if WebSocket fails
     setInterval(pollStatus, 3000);
@@ -112,6 +115,91 @@ function connectWebSocket() {
     }
 }
 
+// ─── Video WebSocket ────────────────────────────────────────────────────────
+let _videoCanvas = null;
+let _videoCtx = null;
+let _videoFpsCount = 0;
+let _videoFpsTime = performance.now();
+let _videoFps = 0;
+
+function connectVideoWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/video`;
+
+    try {
+        wsVideo = new WebSocket(wsUrl);
+        wsVideo.binaryType = 'arraybuffer';
+
+        wsVideo.onopen = () => {
+            console.log('Video WebSocket connected');
+            videoReconnectAttempts = 0;
+        };
+
+        wsVideo.onmessage = (event) => {
+            if (!(event.data instanceof ArrayBuffer)) return;
+
+            // Lazily grab the canvas and context
+            if (!_videoCanvas) {
+                _videoCanvas = document.getElementById('video-canvas');
+                if (_videoCanvas) _videoCtx = _videoCanvas.getContext('2d');
+            }
+            if (!_videoCtx) return;
+
+            // Convert binary JPEG to an image and draw on canvas
+            const blob = new Blob([event.data], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+                // Auto-resize canvas to match frame aspect ratio
+                if (_videoCanvas.width !== img.width || _videoCanvas.height !== img.height) {
+                    _videoCanvas.width = img.width;
+                    _videoCanvas.height = img.height;
+                }
+                _videoCtx.drawImage(img, 0, 0);
+                URL.revokeObjectURL(url);
+
+                // Track received FPS
+                _videoFpsCount++;
+                const now = performance.now();
+                if (now - _videoFpsTime >= 2000) {
+                    _videoFps = Math.round(_videoFpsCount / ((now - _videoFpsTime) / 1000));
+                    _videoFpsCount = 0;
+                    _videoFpsTime = now;
+                    console.log(`Video WS: ${_videoFps} FPS`);
+                }
+            };
+            img.src = url;
+        };
+
+        wsVideo.onclose = () => {
+            console.log('Video WebSocket disconnected');
+            scheduleVideoReconnect();
+        };
+
+        wsVideo.onerror = (err) => {
+            console.error('Video WebSocket error:', err);
+        };
+
+        // Keep-alive ping every 15s
+        setInterval(() => {
+            if (wsVideo && wsVideo.readyState === WebSocket.OPEN) {
+                wsVideo.send('ping');
+            }
+        }, 15000);
+
+    } catch (e) {
+        console.error('Video WebSocket connection failed:', e);
+        scheduleVideoReconnect();
+    }
+}
+
+function scheduleVideoReconnect() {
+    if (videoReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        videoReconnectAttempts++;
+        setTimeout(connectVideoWebSocket, RECONNECT_DELAY_MS);
+    }
+}
+
 function scheduleReconnect() {
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         reconnectAttempts++;
@@ -143,6 +231,8 @@ function handleStatusUpdate(data) {
     updateProduction(data.production || {});
     updateConnections(data.detector_available, data.camera_connected);
     updateLogs(data.recent_logs || []);
+    updateHeaderStatuses(data.detector_available, data.camera_connected);
+    updateSafetyWarning(data.glove_warning);
 
     if (data.source) {
         currentSource = data.source;
@@ -162,14 +252,21 @@ function initGaugeList() {
         const item = document.createElement('div');
         item.className = 'gauge-item';
         item.id = `gauge-item-${id}`;
-        item.setAttribute('data-status', 'PENDING');
+        item.setAttribute('data-status', 'NOT_CHECKED');
 
         item.innerHTML = `
             <span class="gauge-num">${id}</span>
-            <span class="gauge-name">${name}</span>
+            <span class="gauge-thumb">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>
+                </svg>
+            </span>
+            <div style="flex:1;min-width:0;">
+                <div class="gauge-name">${name}</div>
+            </div>
             <span class="gauge-status-badge">
-                <span class="gauge-status-icon">◯</span>
-                <span class="gauge-status-text">Pending</span>
+                <span class="gauge-status-icon">✗</span>
+                <span class="gauge-status-text">Not Checked</span>
             </span>
         `;
 
@@ -187,43 +284,66 @@ function updateGauges(gauges) {
         if (!item) continue;
 
         const status = gauge.status;
-        item.setAttribute('data-status', status);
+        const dwell = gauge.dwell_progress || 0;  // 0.0 to 1.0
+        const displayStatus = (status === 'OK') ? 'OK' : 'NOT_CHECKED';
+        item.setAttribute('data-status', displayStatus);
 
-        const badge = item.querySelector('.gauge-status-badge');
         const iconEl = item.querySelector('.gauge-status-icon');
         const textEl = item.querySelector('.gauge-status-text');
+        const thumbEl = item.querySelector('.gauge-thumb');
 
         if (status === 'OK') {
             completed++;
             iconEl.textContent = '✓';
             textEl.textContent = 'Checked';
-        } else if (status === 'NG') {
-            iconEl.textContent = '✗';
-            textEl.textContent = 'NG';
-        } else if (status === 'WAITING') {
-            iconEl.textContent = '◔';
-            textEl.textContent = 'Waiting';
-        } else if (status === 'NO_GAUGE') {
-            iconEl.textContent = '◔';
-            textEl.textContent = 'No Gauge';
-        } else if (status === 'NO_AREA') {
-            iconEl.textContent = '◔';
-            textEl.textContent = 'No Area';
-        } else if (status === 'UNCERTAIN') {
-            iconEl.textContent = '◔';
-            textEl.textContent = 'Checking...';
+            if (thumbEl) thumbEl.innerHTML = `
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2">
+                    <circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-5"/>
+                </svg>`;
+        } else if (dwell > 0 && status === 'UNCERTAIN') {
+            // Actively being held — show progress ring
+            const pct = Math.round(dwell * 100);
+            const radius = 9;
+            const circ = 2 * Math.PI * radius;
+            const dashOffset = circ * (1 - dwell);
+            iconEl.textContent = '⏱';
+            textEl.textContent = `Hold... ${pct}%`;
+            if (thumbEl) thumbEl.innerHTML = `
+                <svg width="22" height="22" viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="${radius}" fill="none" stroke="#e2e8f0" stroke-width="2.5"/>
+                    <circle cx="12" cy="12" r="${radius}" fill="none" stroke="#f59e0b" stroke-width="2.5"
+                        stroke-dasharray="${circ.toFixed(2)}"
+                        stroke-dashoffset="${dashOffset.toFixed(2)}"
+                        stroke-linecap="round"
+                        transform="rotate(-90 12 12)"/>
+                </svg>`;
         } else {
-            iconEl.textContent = '◯';
-            textEl.textContent = 'Pending';
+            iconEl.textContent = '✗';
+            textEl.textContent = 'Not Checked';
+            if (thumbEl) thumbEl.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>
+                </svg>`;
         }
     }
 
     // Update counter
     const counterEl = document.getElementById('gauge-counter');
     if (counterEl) {
-        counterEl.textContent = `(${completed} / ${total})`;
+        counterEl.textContent = `${completed} / ${total} Completed`;
+    }
+
+    // Update progress bar
+    const progressFill = document.getElementById('gauge-progress-fill');
+    if (progressFill) {
+        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        progressFill.style.width = pct + '%';
+        progressFill.style.background = completed === total
+            ? 'var(--status-ok)'
+            : 'linear-gradient(90deg, var(--accent-blue), var(--status-ok))';
     }
 }
+
 
 // ─── Inspection State Banner ─────────────────────────────────────────────────
 function updateInspectionState(state) {
@@ -317,16 +437,30 @@ function updateConnections(detectorAvailable, cameraConnected) {
 
     if (detEl) {
         detEl.innerHTML = detectorAvailable
-            ? '<span class="status-dot online"></span><span>Active</span>'
+            ? '<span class="status-dot online"></span><span>Connected</span>'
             : '<span class="status-dot offline"></span><span>Offline</span>';
         detEl.style.color = detectorAvailable ? 'var(--status-ok)' : 'var(--status-ng)';
     }
 
     if (camEl) {
         camEl.innerHTML = cameraConnected
-            ? '<span class="status-dot online"></span><span>Active</span>'
+            ? '<span class="status-dot online"></span><span>Connected</span>'
             : '<span class="status-dot offline"></span><span>Offline</span>';
         camEl.style.color = cameraConnected ? 'var(--status-ok)' : 'var(--status-ng)';
+    }
+}
+
+function updateHeaderStatuses(detectorAvailable, cameraConnected) {
+    const camStatusEl = document.getElementById('header-camera-status');
+    const yoloStatusEl = document.getElementById('header-yolo-status');
+
+    if (camStatusEl) {
+        camStatusEl.textContent = cameraConnected ? 'Online' : 'Offline';
+        camStatusEl.style.color = cameraConnected ? 'var(--status-ok)' : 'var(--status-ng)';
+    }
+    if (yoloStatusEl) {
+        yoloStatusEl.textContent = detectorAvailable ? 'Online' : 'Offline';
+        yoloStatusEl.style.color = detectorAvailable ? 'var(--status-ok)' : 'var(--status-ng)';
     }
 }
 
@@ -340,6 +474,17 @@ function updateSystemStatus(connected) {
     } else {
         indicator.innerHTML = '<span class="status-dot offline"></span><span class="status-label" style="color:var(--status-ng)">Disconnected</span>';
         indicator.style.borderColor = 'rgba(231, 76, 60, 0.3)';
+    }
+}
+
+function updateSafetyWarning(isWarningActive) {
+    const overlay = document.getElementById('safety-warning-overlay');
+    if (!overlay) return;
+    
+    if (isWarningActive) {
+        overlay.style.display = 'flex';
+    } else {
+        overlay.style.display = 'none';
     }
 }
 
@@ -396,12 +541,7 @@ async function switchSource(mode) {
             currentSource = mode;
             updateSourceButtons(mode);
             updateCameraModeLabel(mode);
-
-            // Refresh video feed
-            const videoEl = document.getElementById('video-feed');
-            if (videoEl) {
-                videoEl.src = '/video?' + Date.now();
-            }
+            // Video feed auto-updates via WebSocket — no refresh needed
         }
     } catch (e) {
         console.error('Failed to switch source:', e);
@@ -456,3 +596,19 @@ async function resetCounter() {
         console.error('Failed to reset counter:', e);
     }
 }
+
+// ─── Settings ───────────────────────────────────────────────────────────────
+async function toggleConfidence() {
+    const toggle = document.getElementById('conf-toggle');
+    if (!toggle) return;
+    try {
+        await fetch('/settings/confidence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ show: toggle.checked })
+        });
+    } catch (e) {
+        console.error('Failed to toggle confidence:', e);
+    }
+}
+

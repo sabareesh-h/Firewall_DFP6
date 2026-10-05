@@ -24,11 +24,16 @@ KEY DESIGN PRINCIPLE:
 import logging
 import time
 from enum import Enum
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from dataclasses import dataclass
 from datetime import datetime
 
+import config as _cfg
+
 logger = logging.getLogger(__name__)
+
+# Build a set of gauge class IDs from config for fast lookup
+_GAUGE_CLASS_IDS: Set[int] = set(_cfg.GAUGE_CLASSES.keys())
 
 
 # ─── Status Enums ────────────────────────────────────────────────────────────
@@ -70,8 +75,10 @@ class CheckpointResult:
     status: GaugeStatus = GaugeStatus.PENDING
     confidence: float = 0.0
     overlap: float = 0.0
-    ok_count: int = 0           # consecutive OK frames (building towards latch)
+    ok_count: int = 0           # consecutive OK frames (fallback)
     grace_count: int = 0        # frames since gauge last disappeared
+    ok_first_seen: float = 0.0  # time.time() when gauge first became valid (0 = not started)
+    dwell_progress: float = 0.0 # 0.0 to 1.0 — how far towards 1s dwell we are
 
 
 @dataclass
@@ -101,12 +108,14 @@ class GaugeValidator:
         overlap_threshold: float = 0.15,
         near_distance_threshold: float = 150,
         ok_hold_frames: int = 3,
+        ok_hold_seconds: float = 2.0,
         gauge_grace_frames: int = 15,
         part_absent_patience: int = 45,
     ):
         self.overlap_threshold = overlap_threshold
         self.near_distance_threshold = near_distance_threshold
         self.ok_hold_frames = ok_hold_frames
+        self.ok_hold_seconds = ok_hold_seconds
         self.gauge_grace_frames = gauge_grace_frames
         self.part_absent_patience = part_absent_patience
 
@@ -131,6 +140,13 @@ class GaugeValidator:
         self.recent_logs: List[InspectionLog] = []
         self._log_counter = 0
 
+        # Safety logic
+        self._hand_interaction_frames = 0
+        self.glove_warning = False
+
+        # Part memory (for occlusion handling)
+        self._last_known_parts: Dict[str, List[int]] = {}
+
     # ─── Public API ──────────────────────────────────────────────────────
 
     def validate(self, detections: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -141,25 +157,51 @@ class GaugeValidator:
         2. If INSPECTING, validate each unlocked checkpoint.
         3. Check for auto-completion or auto-reset.
         """
-        # Separate gauge detections from part detections
+        # Separate gauge detections from part detections using config class IDs
+        # (not a hardcoded range — class 14 "11mm Gauge" would be missed otherwise)
         gauge_detections: Dict[str, List[Dict]] = {}
         part_detections: Dict[str, List[Dict]] = {}
 
         for det in detections:
             name = det["class_name"]
-            if det["class_id"] <= 5:
+            if det["class_id"] in _GAUGE_CLASS_IDS:
                 gauge_detections.setdefault(name, []).append(det)
             else:
                 part_detections.setdefault(name, []).append(det)
 
+        # ── Step 0: Fix 11mm / 13mm Confusion (The "One Gauge" Rule) ─────
+        # If YOLO detects multiple 13mm gauges, the high-confidence one on the table is the real 13mm.
+        # The lower-confidence one being held/tilted is actually the 11mm gauge.
+        if "13mm" in gauge_detections and len(gauge_detections["13mm"]) > 1:
+            sorted_13 = sorted(gauge_detections["13mm"], key=lambda x: x["confidence"], reverse=True)
+            gauge_detections["13mm"] = [sorted_13[0]]
+            for det in sorted_13[1:]:
+                det["class_name"] = "11mm"
+                # Add to 11mm list (creating it if it doesn't exist)
+                gauge_detections.setdefault("11mm", []).append(det)
+
+        # Conversely, if YOLO detects multiple 11mm gauges, the lower-confidence one is actually 13mm.
+        if "11mm" in gauge_detections and len(gauge_detections["11mm"]) > 1:
+            sorted_11 = sorted(gauge_detections["11mm"], key=lambda x: x["confidence"], reverse=True)
+            gauge_detections["11mm"] = [sorted_11[0]]
+            for det in sorted_11[1:]:
+                det["class_name"] = "13mm"
+                gauge_detections.setdefault("13mm", []).append(det)
+
         # ── Step 1: Part-presence state machine ──────────────────────────
-        tml_present = "TML Part" in part_detections
+        tml_present = "Part" in part_detections
         self._update_part_state(tml_present)
 
         # ── Step 2: Only run gauge checks while INSPECTING ───────────────
         if self.inspection_state == InspectionState.INSPECTING:
             self._run_gauge_checks(gauge_detections, part_detections)
             self._check_completion()
+            
+            # Check for hand interaction — warn if a bare hand is detected anywhere during inspection
+            hand_present = "Hand" in part_detections
+            if hand_present:
+                logger.warning(f"[SAFETY] Hand detected during inspection! Detections: {list(part_detections.keys())}")
+            self.glove_warning = hand_present
 
         return self._build_status()
 
@@ -236,7 +278,26 @@ class GaugeValidator:
         - When a gauge disappears from frame, grace_count ticks up.
           During grace period, ok_count is preserved (not reset).
           Only after grace_count > GAUGE_GRACE_FRAMES does ok_count reset.
+
+        Pin / Dia mutual-exclusion:
+        - The Dia gauge is often physically inside the part area while the
+          operator uses it to help seat the Pin gauge.  To prevent a false
+          OK latch on Dia during that moment, we detect when BOTH Pin AND Dia
+          are simultaneously overlapping the part and suppress Dia's dwell
+          accumulation for that frame (treating Dia as if it were absent).
         """
+        # ── Pin / Dia mutual-exclusion pre-check ──────────────────────────
+        # Detect whether Pin is currently overlapping the part so the Dia
+        # checkpoint can be suppressed in the same frame.
+        pin_inside_part = False
+        if "Pin" in gauge_detections and "Part" in part_detections:
+            best_pin  = max(gauge_detections["Pin"],  key=lambda d: d["confidence"])
+            best_part = max(part_detections["Part"],   key=lambda d: d["confidence"])
+            _pin_valid, _ = self._evaluate_spatial(
+                best_pin["bbox"], best_part["bbox"], "intersects"
+            )
+            pin_inside_part = _pin_valid
+
         for cp_id, config in self._checkpoint_configs.items():
             result = self.checkpoints[cp_id]
 
@@ -267,45 +328,70 @@ class GaugeValidator:
 
             # ── All other methods: need both gauge and part ─────────────
             part_visible = part_class in part_detections
+            part_remembered = part_class in self._last_known_parts
             gauge_visible = gauge_class in gauge_detections
 
-            if not part_visible:
-                # The part area itself is not visible — neutral, wait
+            if not part_visible and not part_remembered:
+                # The part area itself is not visible AND we have no memory of it — neutral, wait
                 self._handle_missing(result, GaugeStatus.NO_AREA)
                 continue
 
             if not gauge_visible:
-                # Part visible but gauge not — operator moved gauge away
+                # Part visible (or remembered) but gauge not — operator moved gauge away
                 self._handle_missing(result, GaugeStatus.NO_GAUGE)
                 continue
 
-            # Both gauge and part are in frame — evaluate spatial check
+            # ── Pin / Dia mutual-exclusion ────────────────────────────────
+            # If Pin is currently inside the part AND this checkpoint is Dia,
+            # treat Dia as absent for this frame so it cannot falsely latch
+            # while the operator is using it to assist with pin insertion.
+            if gauge_class == "Dia" and pin_inside_part:
+                logger.debug(
+                    "[Dia suppressed] Pin is simultaneously inside Part — "
+                    "Dia dwell blocked this frame."
+                )
+                self._handle_missing(result, GaugeStatus.NO_GAUGE)
+                continue
+
+            # Both gauge and part are in frame (or part is remembered) — evaluate spatial check
             result.grace_count = 0   # reset grace since gauge is visible
 
             best_gauge = max(gauge_detections[gauge_class], key=lambda d: d["confidence"])
-            best_part  = max(part_detections[part_class],  key=lambda d: d["confidence"])
+            
+            if part_visible:
+                best_part  = max(part_detections[part_class],  key=lambda d: d["confidence"])
+                part_bbox = best_part["bbox"]
+                # Update memory
+                self._last_known_parts[part_class] = part_bbox
+            else:
+                # Use memory for occluded part
+                part_bbox = self._last_known_parts[part_class]
 
             is_valid, overlap = self._evaluate_spatial(
-                best_gauge["bbox"], best_part["bbox"], method
+                best_gauge["bbox"], part_bbox, method
             )
 
             result.confidence = best_gauge["confidence"]
             result.overlap = overlap
 
             if is_valid:
-                result.ok_count += 1
-                if result.ok_count >= self.ok_hold_frames:
+                now = time.time()
+                if result.ok_first_seen == 0.0:
+                    result.ok_first_seen = now  # start the dwell timer
+                elapsed = now - result.ok_first_seen
+                result.dwell_progress = min(elapsed / self.ok_hold_seconds, 1.0)
+                if elapsed >= self.ok_hold_seconds:
                     result.status = GaugeStatus.OK
                     logger.info(
-                        f"Checkpoint {result.name} → LATCHED OK "
+                        f"Checkpoint {result.name} → LATCHED OK after {elapsed:.1f}s "
                         f"(conf={result.confidence:.2f}, overlap={overlap:.3f})"
                     )
                 else:
                     result.status = GaugeStatus.UNCERTAIN
             else:
-                # Gauge is in the WRONG position right now — show NG
-                # But don't reset ok_count fully: decay slowly so a brief
-                # mis-position doesn't undo hard-won ok_count
+                # Gauge moved away — reset dwell timer and decay
+                result.ok_first_seen = 0.0
+                result.dwell_progress = 0.0
                 result.ok_count = max(0, result.ok_count - 1)
                 result.status = GaugeStatus.NG
 
@@ -313,24 +399,24 @@ class GaugeValidator:
         """
         Called when gauge or part area is not detected in this frame.
 
-        Grace period: preserve ok_count for GAUGE_GRACE_FRAMES so that
+        Grace period: preserve ok_first_seen for GAUGE_GRACE_FRAMES so that
         the operator can briefly move the gauge between checks without
-        losing accumulated progress.
+        losing accumulated dwell progress.
         """
         result.grace_count += 1
 
         if result.grace_count <= self.gauge_grace_frames:
             # Within grace — keep the last non-OK status visible but
-            # don't destroy ok_count yet
-            if result.ok_count > 0:
-                # Operator briefly moved gauge but had some OK frames —
-                # show WAITING so operator knows to bring it back
+            # don't destroy dwell timer yet
+            if result.ok_first_seen > 0.0:
                 result.status = GaugeStatus.WAITING
             else:
                 result.status = missing_status
         else:
             # Grace expired — operator moved on; clear progress
             result.ok_count = 0
+            result.ok_first_seen = 0.0
+            result.dwell_progress = 0.0
             result.status = missing_status
 
     def _check_completion(self) -> None:
@@ -350,6 +436,8 @@ class GaugeValidator:
     ) -> Tuple[bool, float]:
         if method == "inside":
             return self._check_inside(gauge_bbox, part_bbox)
+        elif method == "fully_inside":
+            return self._check_fully_inside(gauge_bbox, part_bbox)
         elif method == "overlap":
             return self._check_overlap(gauge_bbox, part_bbox)
         elif method == "near":
@@ -366,6 +454,13 @@ class GaugeValidator:
         px1, py1, px2, py2 = part_bbox
         inside = px1 <= cx <= px2 and py1 <= cy <= py2
         return inside, self.calculate_iou(gauge_bbox, part_bbox)
+
+    def _check_fully_inside(self, gauge_bbox, part_bbox):
+        """Every corner of the gauge bbox must be inside the part bounding box."""
+        gx1, gy1, gx2, gy2 = gauge_bbox
+        px1, py1, px2, py2 = part_bbox
+        fully = (px1 <= gx1 and py1 <= gy1 and gx2 <= px2 and gy2 <= py2)
+        return fully, self.calculate_iou(gauge_bbox, part_bbox)
 
     def _check_overlap(self, gauge_bbox, part_bbox):
         """Gauge and part bounding boxes must overlap by at least threshold."""
@@ -441,6 +536,7 @@ class GaugeValidator:
                 "status": result.status.value,
                 "confidence": round(result.confidence, 3),
                 "overlap": round(result.overlap, 4),
+                "dwell_progress": round(result.dwell_progress, 3),
             }
 
         return {
@@ -450,6 +546,7 @@ class GaugeValidator:
             "completed": completed,
             "total": total,
             "gauges": gauges,
+            "glove_warning": self.glove_warning,
             "production": {
                 "total_count": self.total_count,
                 "pass_count": self.pass_count,
@@ -474,6 +571,9 @@ class GaugeValidator:
             result.overlap = 0.0
             result.ok_count = 0
             result.grace_count = 0
+            
+        # Clear part memory for the new session
+        self._last_known_parts.clear()
 
     def _add_log(self, result: str) -> None:
         """Record a completed inspection and update production counters."""
