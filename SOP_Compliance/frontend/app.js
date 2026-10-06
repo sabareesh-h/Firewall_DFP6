@@ -352,7 +352,7 @@ function updateSmartOverlays(data) {
             // It's a Gauge
             if (gaugeStatus === 'OK' && dwellProgress >= 1.0) {
                 box.className = 'smart-box success';
-                labelDiv.innerHTML = `✅ ${labelText}`;
+                labelDiv.innerHTML = `✅`;
             } else if (dwellProgress > 0 || gaugeStatus === 'UNCERTAIN') {
                 box.className = 'smart-box active';
                 labelDiv.innerHTML = `🎯 ${labelText}`;
