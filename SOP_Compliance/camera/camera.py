@@ -75,17 +75,10 @@ class Camera:
             logger.warning("Camera already running.")
             return True
 
-        success = self._open_source()
-        if not success and self.mode != "demo":
-            logger.error(f"Failed to open camera source: mode={self.mode}")
-            # Fall back to demo mode
-            self.mode = "demo"
-            self._connected = False
-
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
-        logger.info(f"Camera started in '{self.mode}' mode.")
+        logger.info(f"Camera start requested in '{self.mode}' mode.")
         return True
 
     def stop(self) -> None:
@@ -93,6 +86,7 @@ class Camera:
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3.0)
+        # Release happens in _capture_loop or here as fallback
         self._release()
         logger.info("Camera stopped.")
 
@@ -196,6 +190,12 @@ class Camera:
 
     def _capture_loop(self) -> None:
         """Background thread that continuously reads frames."""
+        success = self._open_source()
+        if not success and self.mode != "demo":
+            logger.error(f"Failed to open camera source: mode={self.mode}")
+            self.mode = "demo"
+            self._connected = False
+
         while self._running:
             try:
                 if self.mode == "demo":

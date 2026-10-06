@@ -151,7 +151,7 @@ GAUGE_CHECKPOINTS = [
 
 # ─── Validation Thresholds ───────────────────────────────────────────────────
 OVERLAP_THRESHOLD = 0.15          # Minimum IoU for "intersects" / "overlap" method
-NEAR_DISTANCE_THRESHOLD = 150    # Max pixel distance for "near" method
+NEAR_DISTANCE_THRESHOLD = 50    # Max pixel distance for "near" method
 OK_HOLD_FRAMES = 3               # Consecutive OK frames needed to latch a gauge as checked (kept for fallback)
 OK_HOLD_SECONDS = 0.1            # Seconds gauge must stay valid on part before latching as checked
 
@@ -176,8 +176,8 @@ HOST = "0.0.0.0"
 PORT = 8000
 
 # ─── Inference ────────────────────────────────────────────────────────────────
-# Target FPS for inference loop (caps processing speed)
-TARGET_FPS = 30
+# Target FPS for inference loop (caps processing speed to reduce heat)
+TARGET_FPS = 10
 
 # ─── UI Labels ────────────────────────────────────────────────────────────────
 APP_TITLE = "SOP Compliance Software"

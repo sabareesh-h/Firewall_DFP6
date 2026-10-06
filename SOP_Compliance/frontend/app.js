@@ -258,7 +258,132 @@ function handleStatusUpdate(data) {
         updateSourceButtons(data.source);
         updateCameraModeLabel(data.source);
     }
+    
+    // Render the Smart Overlays
+    if (data.raw_detections) {
+        updateSmartOverlays(data);
+    }
 }
+
+// ─── Smart Focus Overlays ───────────────────────────────────────────────────
+let previousBoxIds = new Set();
+function updateSmartOverlays(data) {
+    const container = document.getElementById('smart-overlay-container');
+    const canvas = document.getElementById('video-canvas');
+    if (!container || !canvas || !data.raw_detections) return;
+
+    // We calculate scaling factor based on original frame size vs rendered canvas client size
+    const cw = canvas.clientWidth;
+    const ch = canvas.clientHeight;
+    if (cw === 0 || ch === 0) return; // Not visible yet
+
+    const scaleX = cw / (data.frame_width || 1280);
+    const scaleY = ch / (data.frame_height || 720);
+
+    const currentBoxIds = new Set();
+    const classCounts = {};
+
+    data.raw_detections.forEach((det) => {
+        // Stable ID generation to prevent CSS transition flickering when array index changes
+        const safeClassName = det.class_name.replace(/\s+/g, '-');
+        classCounts[safeClassName] = (classCounts[safeClassName] || 0) + 1;
+        const id = `det-${safeClassName}-${classCounts[safeClassName]}`;
+        
+        currentBoxIds.add(id);
+
+        let box = document.getElementById(id);
+        if (!box) {
+            box = document.createElement('div');
+            box.id = id;
+            box.className = 'smart-box';
+            
+            const label = document.createElement('div');
+            label.className = 'smart-label';
+            box.appendChild(label);
+            
+            container.appendChild(box);
+        }
+
+        // Positioning
+        const [x1, y1, x2, y2] = det.bbox;
+        const left = x1 * scaleX;
+        const top = y1 * scaleY;
+        const width = (x2 - x1) * scaleX;
+        const height = (y2 - y1) * scaleY;
+
+        box.style.left = `${left}px`;
+        box.style.top = `${top}px`;
+        box.style.width = `${width}px`;
+        box.style.height = `${height}px`;
+
+        // Content
+        const labelDiv = box.querySelector('.smart-label');
+        let labelText = det.class_name;
+        if (data.show_confidence_score) {
+            labelText += ` <span>${det.confidence.toFixed(2)}</span>`;
+        }
+        labelDiv.innerHTML = labelText;
+
+        // Styling State
+        let isGauge = false;
+        let gaugeStatus = null;
+        let dwellProgress = 0;
+
+        // Match YOLO class name (e.g., "Pin") with gauge name (e.g., "Pin Gauge")
+        if (data.gauges) {
+            for (const key in data.gauges) {
+                if (data.gauges[key].name.startsWith(det.class_name)) {
+                    isGauge = true;
+                    gaugeStatus = data.gauges[key].status;
+                    dwellProgress = data.gauges[key].dwell_progress;
+                    break;
+                }
+            }
+        }
+        
+        // Parts usually aren't gauges
+        if (det.class_name === 'Part' || det.class_name === 'Hand' || !isGauge) {
+            box.className = 'smart-box idle-part';
+            if (det.class_name === 'Hand') {
+                box.style.borderColor = 'rgba(220, 38, 38, 0.6)';
+                labelDiv.style.background = 'rgba(220, 38, 38, 0.9)';
+            }
+        } else {
+            // It's a Gauge
+            if (gaugeStatus === 'OK' && dwellProgress >= 1.0) {
+                box.className = 'smart-box success';
+                labelDiv.innerHTML = `✅ ${labelText}`;
+            } else if (dwellProgress > 0 || gaugeStatus === 'UNCERTAIN') {
+                box.className = 'smart-box active';
+                labelDiv.innerHTML = `🎯 ${labelText}`;
+            } else {
+                box.className = 'smart-box idle-gauge';
+            }
+        }
+    });
+
+    // Remove old boxes that disappeared
+    previousBoxIds.forEach(id => {
+        if (!currentBoxIds.has(id)) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+    });
+    previousBoxIds = currentBoxIds;
+}
+
+function toggleFocusMode() {
+    const container = document.getElementById('smart-overlay-container');
+    const toggle = document.getElementById('focus-mode-toggle');
+    if (container && toggle) {
+        if (toggle.checked) {
+            container.classList.add('focus-mode-on');
+        } else {
+            container.classList.remove('focus-mode-on');
+        }
+    }
+}
+
 
 // ─── Gauge List ─────────────────────────────────────────────────────────────
 function initGaugeList() {
@@ -299,7 +424,7 @@ function updateGauges(gauges) {
 
         const status = gauge.status;
         const dwell = gauge.dwell_progress || 0;  // 0.0 to 1.0
-        
+
         let displayStatus = 'NOT_CHECKED';
         if (status === 'OK') {
             displayStatus = 'OK';
@@ -307,7 +432,7 @@ function updateGauges(gauges) {
         } else if (dwell > 0 && status === 'UNCERTAIN') {
             displayStatus = 'UNCERTAIN';
         }
-        
+
         item.setAttribute('data-status', displayStatus);
     }
 
@@ -334,9 +459,9 @@ function updateInspectionState(state) {
     const stateEl = document.getElementById('inspection-state-label');
     if (!stateEl) return;
     const labels = {
-        IDLE:       '\u23f3  Waiting for Part',
+        IDLE: '\u23f3  Waiting for Part',
         INSPECTING: '\u25cf  Inspection in Progress',
-        COMPLETE:   '\u2713  Complete \u2014 Remove Part',
+        COMPLETE: '\u2713  Complete \u2014 Remove Part',
     };
     const colors = { IDLE: '#94a3b8', INSPECTING: '#d97706', COMPLETE: '#16a34a' };
     stateEl.textContent = labels[state] || (state || '');
@@ -464,7 +589,7 @@ function updateSystemStatus(connected) {
 function updateSafetyWarning(isWarningActive) {
     const overlay = document.getElementById('safety-warning-overlay');
     if (!overlay) return;
-    
+
     if (isWarningActive) {
         overlay.style.display = 'flex';
     } else {
@@ -592,6 +717,20 @@ async function toggleConfidence() {
     }
 }
 
+async function togglePacing() {
+    const toggle = document.getElementById('pacing-toggle');
+    if (!toggle) return;
+    try {
+        await fetch('/settings/pacing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enable: toggle.checked })
+        });
+    } catch (e) {
+        console.error('Failed to toggle pacing:', e);
+    }
+}
+
 // ─── Barcode Scanner ────────────────────────────────────────────────────────
 let barcodeBuffer = '';
 let lastKeyTime = 0;
@@ -601,12 +740,12 @@ document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     const currentTime = new Date().getTime();
-    
+
     // Most hardware scanners act as a keyboard and emit keys very rapidly
     if (currentTime - lastKeyTime > 100) {
         barcodeBuffer = ''; // Reset buffer if more than 100ms passed between keystrokes
     }
-    
+
     if (e.key === 'Enter') {
         if (barcodeBuffer.length > 0) {
             handleBarcodeScanned(barcodeBuffer);
@@ -615,7 +754,7 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key.length === 1) { // Normal printable character
         barcodeBuffer += e.key;
     }
-    
+
     lastKeyTime = currentTime;
 });
 
@@ -630,5 +769,143 @@ function handleBarcodeScanned(code) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ part_no: code })
         }).catch(err => console.error("Failed to set part no:", err));
+    }
+}
+
+// ─── Admin Panel ────────────────────────────────────────────────────────────
+
+function openAdminModal() {
+    document.getElementById('admin-modal').style.display = 'flex';
+    document.getElementById('admin-login-view').style.display = 'block';
+    document.getElementById('admin-settings-view').style.display = 'none';
+    document.getElementById('admin-title').textContent = 'Admin Login';
+    document.getElementById('admin-pin').value = '';
+    document.getElementById('admin-pin').focus();
+}
+
+function closeAdminModal() {
+    document.getElementById('admin-modal').style.display = 'none';
+}
+
+function verifyAdminPin() {
+    const pin = document.getElementById('admin-pin').value;
+    // In a real app, verify via backend. Here, hardcoded to 1234.
+    if (pin === '1234') {
+        document.getElementById('admin-login-view').style.display = 'none';
+        document.getElementById('admin-settings-view').style.display = 'block';
+        document.getElementById('admin-title').textContent = 'Dynamic Settings';
+        fetchAdminSettings();
+    } else {
+        alert('Incorrect PIN');
+    }
+}
+
+async function fetchAdminSettings() {
+    try {
+        const response = await fetch('/settings');
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('set-conf').value = data.confidence_threshold;
+            document.getElementById('set-overlap').value = data.overlap_threshold;
+            document.getElementById('set-near').value = data.near_distance_threshold;
+            document.getElementById('set-dwell').value = data.ok_hold_seconds;
+            if (data.visual_deadzone) {
+                document.getElementById('set-deadzone').value = data.visual_deadzone.join(', ');
+            } else {
+                document.getElementById('set-deadzone').value = '';
+            }
+            
+            // Populate individual gauges
+            const container = document.getElementById('gauge-settings-container');
+            container.innerHTML = ''; // clear
+            
+            if (data.gauge_configs) {
+                data.gauge_configs.forEach(g => {
+                    const html = `
+                        <div class="admin-gauge-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px;" data-id="${g.id}">
+                            <div style="font-weight: 700; color: #334155; margin-bottom: 8px; font-size: 13px;">#${g.id} — ${g.name}</div>
+                            
+                            <div class="admin-field" style="margin-bottom: 8px;">
+                                <label style="font-size: 11px;">Method</label>
+                                <select class="g-method" style="width: 100%; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px;">
+                                    <option value="near" ${g.method === 'near' ? 'selected' : ''}>Near Distance</option>
+                                    <option value="intersects" ${g.method === 'intersects' ? 'selected' : ''}>Intersects / Overlaps Area</option>
+                                    <option value="inside" ${g.method === 'inside' ? 'selected' : ''}>Center Inside Area</option>
+                                    <option value="fully_inside" ${g.method === 'fully_inside' ? 'selected' : ''}>Fully Inside Area</option>
+                                </select>
+                            </div>
+                            
+                            <div style="display: flex; gap: 10px;">
+                                <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                                    <label style="font-size: 11px;">Near Thresh (px)</label>
+                                    <input type="number" class="g-near" value="${g.near_distance_threshold}" step="10" style="padding: 6px; font-size: 12px;">
+                                </div>
+                                <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                                    <label style="font-size: 11px;">Overlap Thresh</label>
+                                    <input type="number" class="g-overlap" value="${g.overlap_threshold}" step="0.05" style="padding: 6px; font-size: 12px;">
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', html);
+                });
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch settings:', e);
+    }
+}
+
+async function saveAdminSettings() {
+    const conf = parseFloat(document.getElementById('set-conf').value);
+    const overlap = parseFloat(document.getElementById('set-overlap').value);
+    const near = parseInt(document.getElementById('set-near').value);
+    const dwell = parseFloat(document.getElementById('set-dwell').value);
+    
+    let deadzone = null;
+    const deadzoneStr = document.getElementById('set-deadzone').value.trim();
+    if (deadzoneStr) {
+        const parts = deadzoneStr.split(',').map(s => parseInt(s.trim()));
+        if (parts.length === 4 && parts.every(p => !isNaN(p))) {
+            deadzone = parts;
+        } else {
+            alert('Visual Deadzone must be 4 numbers separated by commas (x1, y1, x2, y2)');
+            return;
+        }
+    }
+    
+    // Collect gauge configs
+    const gauge_configs = [];
+    document.querySelectorAll('.admin-gauge-card').forEach(card => {
+        gauge_configs.push({
+            id: parseInt(card.getAttribute('data-id')),
+            method: card.querySelector('.g-method').value,
+            near_distance_threshold: parseInt(card.querySelector('.g-near').value),
+            overlap_threshold: parseFloat(card.querySelector('.g-overlap').value)
+        });
+    });
+
+    try {
+        const response = await fetch('/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                confidence_threshold: conf,
+                overlap_threshold: overlap,
+                near_distance_threshold: near,
+                ok_hold_seconds: dwell,
+                gauge_configs: gauge_configs,
+                visual_deadzone: deadzone
+            })
+        });
+
+        if (response.ok) {
+            alert('Settings updated successfully!');
+            closeAdminModal();
+        } else {
+            alert('Failed to update settings');
+        }
+    } catch (e) {
+        console.error('Failed to save settings:', e);
     }
 }

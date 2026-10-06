@@ -396,8 +396,11 @@ class GaugeValidator:
                 # Use memory for occluded part
                 part_bbox = self._last_known_parts[part_class]
 
+            overlap_thresh = config.get("overlap_threshold", self.overlap_threshold)
+            near_thresh = config.get("near_distance_threshold", self.near_distance_threshold)
+
             is_valid, overlap = self._evaluate_spatial(
-                best_gauge["bbox"], part_bbox, method
+                best_gauge["bbox"], part_bbox, method, overlap_thresh, near_thresh
             )
 
             result.confidence = best_gauge["confidence"]
@@ -462,15 +465,20 @@ class GaugeValidator:
         gauge_bbox: List[int],
         part_bbox: List[int],
         method: str,
+        overlap_threshold: float = None,
+        near_distance_threshold: float = None,
     ) -> Tuple[bool, float]:
+        overlap_threshold = overlap_threshold if overlap_threshold is not None else self.overlap_threshold
+        near_distance_threshold = near_distance_threshold if near_distance_threshold is not None else self.near_distance_threshold
+
         if method == "inside":
             return self._check_inside(gauge_bbox, part_bbox)
         elif method == "fully_inside":
             return self._check_fully_inside(gauge_bbox, part_bbox)
         elif method == "overlap":
-            return self._check_overlap(gauge_bbox, part_bbox)
+            return self._check_overlap(gauge_bbox, part_bbox, overlap_threshold)
         elif method == "near":
-            return self._check_near(gauge_bbox, part_bbox)
+            return self._check_near(gauge_bbox, part_bbox, near_distance_threshold)
         elif method == "intersects":
             return self._check_intersects(gauge_bbox, part_bbox)
         else:
@@ -491,17 +499,17 @@ class GaugeValidator:
         fully = (px1 <= gx1 and py1 <= gy1 and gx2 <= px2 and gy2 <= py2)
         return fully, self.calculate_iou(gauge_bbox, part_bbox)
 
-    def _check_overlap(self, gauge_bbox, part_bbox):
+    def _check_overlap(self, gauge_bbox, part_bbox, overlap_threshold):
         """Gauge and part bounding boxes must overlap by at least threshold."""
         iou = self.calculate_iou(gauge_bbox, part_bbox)
-        return iou >= self.overlap_threshold, iou
+        return iou >= overlap_threshold, iou
 
-    def _check_near(self, gauge_bbox, part_bbox):
+    def _check_near(self, gauge_bbox, part_bbox, near_distance_threshold):
         """Gauge center must be within distance threshold of part center."""
         gcx, gcy = self._center(gauge_bbox)
         pcx, pcy = self._center(part_bbox)
         dist = ((gcx - pcx) ** 2 + (gcy - pcy) ** 2) ** 0.5
-        return dist <= self.near_distance_threshold, self.calculate_iou(gauge_bbox, part_bbox)
+        return dist <= near_distance_threshold, self.calculate_iou(gauge_bbox, part_bbox)
 
     def _check_intersects(self, gauge_bbox, part_bbox):
         """Any overlap between gauge and part bbox counts."""

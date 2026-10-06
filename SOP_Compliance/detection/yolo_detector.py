@@ -158,6 +158,14 @@ class YOLODetector:
     @property
     def using_tensorrt(self) -> bool:
         return self._using_trt
+        
+    @property
+    def deadzone(self) -> Optional[List[int]]:
+        return getattr(self, "_deadzone", None)
+        
+    @deadzone.setter
+    def deadzone(self, value: Optional[List[int]]):
+        self._deadzone = value
 
     # ─── Inference ───────────────────────────────────────────────────────
 
@@ -222,6 +230,13 @@ class YOLODetector:
                     cls_id = int(box.cls[0])
                     conf   = float(box.conf[0])
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    
+                    if self.deadzone and len(self.deadzone) == 4:
+                        dx1, dy1, dx2, dy2 = self.deadzone
+                        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                        if dx1 <= cx <= dx2 and dy1 <= cy <= dy2:
+                            continue
+
                     detections.append({
                         "class_id":   cls_id,
                         "class_name": self.class_names.get(cls_id, f"class_{cls_id}"),

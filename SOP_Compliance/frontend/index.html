@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
+
 <body>
 
     <!-- Safety Warning Banner (fixed, page-level, not clipped by any container) -->
@@ -34,17 +36,230 @@
         animation: safetyPulse 1s ease-in-out infinite;
     ">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
         ⚠️ SAFETY: Use gloves when handling the part!
     </div>
     <style>
         @keyframes safetyPulse {
-            0%, 100% { box-shadow: 0 8px 32px rgba(220,38,38,0.35); }
-            50% { box-shadow: 0 8px 40px rgba(220,38,38,0.55), 0 0 0 4px rgba(220,38,38,0.12); }
+
+            0%,
+            100% {
+                box-shadow: 0 8px 32px rgba(220, 38, 38, 0.35);
+            }
+
+            50% {
+                box-shadow: 0 8px 40px rgba(220, 38, 38, 0.55), 0 0 0 4px rgba(220, 38, 38, 0.12);
+            }
+        }
+
+        /* Admin Modal Styles */
+        .admin-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .admin-modal {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            width: 450px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .admin-modal h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 20px;
+            color: #1e293b;
+        }
+
+        .admin-field {
+            margin-bottom: 16px;
+        }
+
+        .admin-field label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #475569;
+        }
+
+        .admin-field input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .admin-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        .btn-admin {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-cancel {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        .btn-save {
+            background: #0ea5e9;
+            color: white;
+        }
+
+        /* ─── Smart Focus Overlays ─── */
+        .smart-box {
+            position: absolute;
+            box-sizing: border-box;
+            border-radius: 4px;
+            transition: all 0.2s ease-out;
+            pointer-events: none;
+        }
+        
+        .smart-box.idle-gauge {
+            border: 1px dashed rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.02);
+        }
+        
+        .smart-box.idle-part {
+            border: 2px solid rgba(255, 204, 0, 0.5);
+            background: rgba(255, 204, 0, 0.05);
+        }
+
+        .smart-box.active {
+            border: 2px solid #0ea5e9;
+            background: rgba(14, 165, 233, 0.15);
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.4);
+            z-index: 10;
+        }
+
+        .smart-box.success {
+            border: 2px solid #22c55e;
+            background: rgba(34, 197, 94, 0.2);
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
+            animation: successPulse 0.5s ease-out;
+            z-index: 10;
+        }
+
+        @keyframes successPulse {
+            0% { transform: scale(1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(34, 197, 94, 0.8); }
+            100% { transform: scale(1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+        }
+
+        .smart-label {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.85);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            pointer-events: none;
+            transform: translate(-50%, -120%);
+            left: 50%;
+            top: 0;
+            z-index: 11;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .smart-box.active .smart-label, .smart-box.success .smart-label, .smart-box.idle-part .smart-label {
+            opacity: 1;
+        }
+        
+        .smart-box.idle-part .smart-label {
+            background: rgba(80, 60, 0, 0.85);
+            border-color: rgba(255, 204, 0, 0.3);
+        }
+        
+        .focus-mode-on .smart-box.idle-gauge {
+            display: none !important;
         }
     </style>
+
+    <!-- Admin Panel Modal -->
+    <div id="admin-modal" class="admin-modal-overlay">
+        <div class="admin-modal">
+            <h2 id="admin-title">Admin Login</h2>
+
+            <div id="admin-login-view">
+                <div class="admin-field">
+                    <label>Supervisor PIN</label>
+                    <input type="password" id="admin-pin" placeholder="Enter PIN (try 1234)">
+                </div>
+                <div class="admin-buttons">
+                    <button class="btn-admin btn-cancel" onclick="closeAdminModal()">Cancel</button>
+                    <button class="btn-admin btn-save" onclick="verifyAdminPin()">Login</button>
+                </div>
+            </div>
+
+            <div id="admin-settings-view" style="display: none; max-height: 70vh; overflow-y: auto; padding-right: 10px;">
+                <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px;">Global Settings</h3>
+                <div class="admin-field">
+                    <label>Confidence Threshold (0.0 to 1.0)</label>
+                    <input type="number" id="set-conf" step="0.05" min="0" max="1">
+                </div>
+                <div class="admin-field">
+                    <label>Overlap Threshold (0.0 to 1.0)</label>
+                    <input type="number" id="set-overlap" step="0.05" min="0" max="1">
+                </div>
+                <div class="admin-field">
+                    <label>Near Distance Threshold (pixels)</label>
+                    <input type="number" id="set-near" step="10">
+                </div>
+                <div class="admin-field">
+                    <label>Dwell Time (seconds)</label>
+                    <input type="number" id="set-dwell" step="0.1">
+                </div>
+                <div class="admin-field">
+                    <label>Visual Deadzone (x1, y1, x2, y2) [Optional]</label>
+                    <input type="text" id="set-deadzone" placeholder="e.g. 100, 100, 400, 400">
+                    <div style="font-size: 10px; color: #94a3b8; margin-top: 4px;">Detections inside this box are ignored. Leave blank to disable.</div>
+                </div>
+
+                <h3 style="margin: 20px 0 10px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px;">Individual Gauge Settings</h3>
+                <div id="gauge-settings-container">
+                    <!-- Populated dynamically by app.js -->
+                </div>
+
+                <div class="admin-buttons">
+                    <button class="btn-admin btn-cancel" onclick="closeAdminModal()">Close</button>
+                    <button class="btn-admin btn-save" onclick="saveAdminSettings()">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ═══════════ HEADER BAR ═══════════ -->
 
@@ -52,9 +267,11 @@
         <!-- Left: Logo -->
         <div class="header-left">
             <div class="logo-area">
-                <img src="/reference_images/Logo.png" alt="Delphi - TVS Technologies" style="height: 38px; object-fit: contain; margin-left: 10px; background-color: #fff; border-radius: 6px; padding: 4px 8px;">
+                <img src="/reference_images/Logo.png" alt="Delphi - TVS Technologies"
+                    style="height: 38px; object-fit: contain; margin-left: 10px; background-color: #fff; border-radius: 6px; padding: 4px 8px;">
             </div>
-            <select id="header-source-select" onchange="switchSource(this.value)" style="margin-left: 15px; padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-size: 13px; font-weight: 600; outline: none; cursor: pointer;">
+            <select id="header-source-select" onchange="switchSource(this.value)"
+                style="margin-left: 15px; padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); font-size: 13px; font-weight: 600; outline: none; cursor: pointer;">
                 <option value="live" style="color: #333;">Live Camera</option>
                 <option value="video" selected style="color: #333;">Pre-recorded Video</option>
                 <option value="demo" style="color: #333;">Demo Mode</option>
@@ -69,12 +286,16 @@
             </div>
             <div class="header-divider"></div>
             <div class="header-app-block">
-                <svg class="header-gear" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                <svg class="header-gear" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
                 <span class="header-app-name">FIRE WALL DFP6</span>
-                <svg class="header-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <polyline points="6 9 12 15 18 9"/>
+                <svg class="header-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2.5">
+                    <polyline points="6 9 12 15 18 9" />
                 </svg>
             </div>
             <div class="header-divider"></div>
@@ -88,13 +309,17 @@
             <div class="header-datetime">
                 <div class="header-date-wrap">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
                     <span id="header-date" class="header-date">--</span>
                 </div>
                 <div class="header-time-wrap">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
                     </svg>
                     <span id="header-time" class="header-time">--:--:--</span>
                 </div>
@@ -104,7 +329,10 @@
                     <span class="status-dot online"></span>
                     <span class="status-label">System Online</span>
                 </div>
-
+                <button onclick="openAdminModal()"
+                    style="margin-left: 15px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); color: white; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;">
+                    ⚙️ Admin
+                </button>
             </div>
         </div>
     </header>
@@ -120,13 +348,15 @@
             <!-- Part Number (Scanner) -->
             <section class="card" id="part-no-card">
                 <div class="card-header">
-                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M4 5h2v14H4zm6 0h2v14h-2zm6 0h2v14h-2zm4 0h2v14h-2z"/>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M4 5h2v14H4zm6 0h2v14h-2zm6 0h2v14h-2zm4 0h2v14h-2z" />
                     </svg>
                     <span class="card-title">Part No.</span>
                 </div>
                 <div class="card-body">
-                    <div style="font-size: 20px; font-weight: 800; color: var(--accent-dark); text-align: center; padding: 10px 0; word-break: break-all; font-variant-numeric: tabular-nums;" id="scanned-part-no">
+                    <div style="font-size: 20px; font-weight: 800; color: var(--accent-dark); text-align: center; padding: 10px 0; word-break: break-all; font-variant-numeric: tabular-nums;"
+                        id="scanned-part-no">
                         --
                     </div>
                 </div>
@@ -135,8 +365,11 @@
             <!-- Production Summary -->
             <section class="card" id="production-card">
                 <div class="card-header">
-                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <line x1="18" y1="20" x2="18" y2="10" />
+                        <line x1="12" y1="20" x2="12" y2="4" />
+                        <line x1="6" y1="20" x2="6" y2="14" />
                     </svg>
                     <span class="card-title">Production Summary</span>
                 </div>
@@ -164,8 +397,12 @@
             <!-- Connection Status -->
             <section class="card" id="connections-card">
                 <div class="card-header">
-                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                        <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                        <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                        <line x1="12" y1="20" x2="12.01" y2="20" />
                     </svg>
                     <span class="card-title">Connection Status</span>
                 </div>
@@ -196,8 +433,11 @@
             <!-- Current Application -->
             <section class="card" id="app-info-card">
                 <div class="card-header">
-                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <circle cx="12" cy="12" r="3" />
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                     </svg>
                     <span class="card-title">Current Application</span>
                 </div>
@@ -227,8 +467,10 @@
         <!-- ──── CENTER — CAMERA VIEW ──── -->
         <section class="center-panel" id="camera-panel">
             <div class="camera-header">
-                <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2">
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                 </svg>
                 <span class="camera-title">Live Camera View</span>
                 <div class="live-indicator" id="live-dot">
@@ -237,22 +479,67 @@
                 </div>
                 <span class="inspection-state-badge" id="inspection-state-label">⏳ Waiting for Part</span>
                 <span class="camera-subtitle" id="camera-mode-label">(PRE-RECORDED VIDEO)</span>
-                
-                <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
-                    <label for="conf-toggle" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Show Confidence</label>
-                    <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
-                        <input type="checkbox" id="conf-toggle" onchange="toggleConfidence()" style="opacity: 0; width: 0; height: 0;">
-                        <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
-                        <style>
-                            #conf-toggle:checked + .slider { background-color: #0d9488; }
-                            .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
-                            #conf-toggle:checked + .slider:before { transform: translateX(14px); }
-                        </style>
-                    </label>
+
+                <div style="margin-left: auto; display: flex; align-items: center; gap: 16px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="focus-mode-toggle" style="font-size: 0.8rem; color: #0ea5e9; font-weight: 700;">Focus Mode</label>
+                        <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                            <input type="checkbox" id="focus-mode-toggle" onchange="toggleFocusMode()" checked
+                                style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round"
+                                style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="pacing-toggle" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Dynamic Pacing</label>
+                        <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                            <input type="checkbox" id="pacing-toggle" onchange="togglePacing()" checked
+                                style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round"
+                                style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="conf-toggle" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Show Confidence</label>
+                        <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                            <input type="checkbox" id="conf-toggle" onchange="toggleConfidence()"
+                                style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round"
+                                style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
+                            <style>
+                                #conf-toggle:checked+.slider, #pacing-toggle:checked+.slider, #focus-mode-toggle:checked+.slider {
+                                    background-color: #0d9488;
+                                }
+                                #focus-mode-toggle:checked+.slider {
+                                    background-color: #0ea5e9;
+                                }
+
+                                .slider:before {
+                                    position: absolute;
+                                    content: "";
+                                    height: 14px;
+                                    width: 14px;
+                                    left: 3px;
+                                    bottom: 3px;
+                                    background-color: white;
+                                    transition: .4s;
+                                    border-radius: 50%;
+                                    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+                                }
+
+                                #conf-toggle:checked+.slider:before, #pacing-toggle:checked+.slider:before, #focus-mode-toggle:checked+.slider:before {
+                                    transform: translateX(14px);
+                                }
+                            </style>
+                        </label>
+                    </div>
                 </div>
             </div>
-            <div class="camera-container">
-                <canvas id="video-canvas" width="960" height="540"></canvas>
+            <div class="camera-container" style="display: flex; justify-content: center; align-items: center; height: 100%;">
+                <div style="position: relative; display: inline-block; width: 100%; max-width: 960px;">
+                    <canvas id="video-canvas" width="960" height="540" style="display: block; width: 100%; height: auto;"></canvas>
+                    <div id="smart-overlay-container" class="focus-mode-on" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden;"></div>
+                </div>
                 <div class="camera-overlay" id="camera-overlay" style="display: none;">
                     <span class="overlay-text">No Feed Available</span>
                 </div>
@@ -265,8 +552,10 @@
             <!-- Gauge Check Points -->
             <section class="card gauge-card" id="gauge-card">
                 <div class="card-header">
-                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
                     </svg>
                     <span class="card-title">Gauge Check Points</span>
                     <span class="gauge-counter" id="gauge-counter">0 / 7 Completed</span>
@@ -282,15 +571,17 @@
             <!-- Final Result -->
             <section class="card result-card" id="result-card">
                 <div class="card-header">
-                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                     </svg>
                     <span class="card-title">Final Result</span>
                 </div>
                 <div class="card-body result-body" id="result-body">
                     <div class="result-icon" id="result-icon">
                         <svg class="result-svg" viewBox="0 0 60 60">
-                            <circle cx="30" cy="30" r="26" fill="none" stroke="#666" stroke-width="3" stroke-dasharray="5,5"/>
+                            <circle cx="30" cy="30" r="26" fill="none" stroke="#666" stroke-width="3"
+                                stroke-dasharray="5,5" />
                         </svg>
                     </div>
                     <div class="result-text">
@@ -313,8 +604,13 @@
     <!-- ═══════════ BOTTOM — RECENT LOGS ═══════════ -->
     <section class="bottom-panel" id="logs-panel">
         <div class="logs-header">
-            <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            <svg class="card-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
             </svg>
             <span class="logs-title">Recent Inspection Logs</span>
             <a href="#" class="logs-view-all">View All →</a>
@@ -338,10 +634,12 @@
 
     <!-- ═══════════ FOOTER ═══════════ -->
     <footer id="footer">
-        <span class="footer-company">Delphi-TVS Technologies Limited <span class="footer-sep">|</span> Tomorrow's Engineering Today</span>
+        <span class="footer-company">Delphi-TVS Technologies Limited <span class="footer-sep">|</span> Tomorrow's
+            Engineering Today</span>
         <span class="footer-version">Version 1.0.0</span>
     </footer>
 
     <script src="/static/app.js?v=8"></script>
 </body>
+
 </html>

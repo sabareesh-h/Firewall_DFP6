@@ -9,10 +9,14 @@ import asyncio
 import json
 import logging
 import os
+os.environ["YOLO_OFFLINE"] = "True"
+os.environ["YOLOV8_NO_TELEMETRY"] = "1"
+os.environ["YOLO_VERBOSE"] = "False"
+
 import threading
 import time
 from contextlib import asynccontextmanager
-from typing import Optional, Set
+from typing import Optional, Set, List
 
 import cv2
 import numpy as np
@@ -69,6 +73,25 @@ current_source = config.DEFAULT_SOURCE
 
 # UI Settings
 show_confidence_score = False
+enable_pacing = True
+
+SETTINGS_FILE = os.path.join(config.BASE_DIR, "settings.json")
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load settings.json: {e}")
+    return {}
+
+def save_settings(data):
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        logger.error(f"Failed to save settings.json: {e}")
 
 
 # ─── Pydantic Models ─────────────────────────────────────────────────────────
@@ -87,17 +110,26 @@ async def lifespan(app: FastAPI):
     logger.info("  SOP Compliance System — Starting Up")
     logger.info("=" * 60)
 
+    saved_settings = load_settings()
+    detector_conf = saved_settings.get("confidence_threshold", config.CONFIDENCE_THRESHOLD)
+    validator_overlap = saved_settings.get("overlap_threshold", config.OVERLAP_THRESHOLD)
+    validator_near = saved_settings.get("near_distance_threshold", config.NEAR_DISTANCE_THRESHOLD)
+    validator_hold = saved_settings.get("ok_hold_seconds", config.OK_HOLD_SECONDS)
+    visual_deadzone = saved_settings.get("visual_deadzone", None)
+
     # Initialize YOLO detector — run in a thread so the heavy model load
     # does NOT block the asyncio event loop (which causes CancelledError).
     def _build_detector():
-        return YOLODetector(
+        d = YOLODetector(
             model_path=config.MODEL_PATH,
-            confidence_threshold=config.CONFIDENCE_THRESHOLD,
+            confidence_threshold=detector_conf,
             iou_threshold=config.IOU_THRESHOLD,
             imgsz=config.IMGSZ,
             device=config.DEVICE,
             engine_path=config.MODEL_ENGINE_PATH,
         )
+        d.deadzone = visual_deadzone
+        return d
 
     detector = await asyncio.to_thread(_build_detector)
 
@@ -109,13 +141,23 @@ async def lifespan(app: FastAPI):
     # Initialize gauge validator
     validator = GaugeValidator(
         checkpoints=config.GAUGE_CHECKPOINTS,
-        overlap_threshold=config.OVERLAP_THRESHOLD,
-        near_distance_threshold=config.NEAR_DISTANCE_THRESHOLD,
+        overlap_threshold=validator_overlap,
+        near_distance_threshold=validator_near,
         ok_hold_frames=config.OK_HOLD_FRAMES,
-        ok_hold_seconds=config.OK_HOLD_SECONDS,
+        ok_hold_seconds=validator_hold,
         gauge_grace_frames=config.GAUGE_GRACE_FRAMES,
         part_absent_patience=config.PART_ABSENT_PATIENCE,
     )
+    
+    if "gauge_configs" in saved_settings and saved_settings["gauge_configs"]:
+        for g_conf in saved_settings["gauge_configs"]:
+            cp_id = g_conf.get("id")
+            if cp_id in validator._checkpoint_configs:
+                validator._checkpoint_configs[cp_id]["method"] = g_conf.get("method", "near")
+                if "overlap_threshold" in g_conf:
+                    validator._checkpoint_configs[cp_id]["overlap_threshold"] = g_conf["overlap_threshold"]
+                if "near_distance_threshold" in g_conf:
+                    validator._checkpoint_configs[cp_id]["near_distance_threshold"] = g_conf["near_distance_threshold"]
 
     # Initialize camera
     camera = Camera(
@@ -195,6 +237,7 @@ def inference_loop():
     _live_fps        = 0.0
 
     while inference_running:
+        loop_start_time = time.time()
         try:
             if camera is None:
                 time.sleep(0.1)
@@ -214,15 +257,8 @@ def inference_loop():
             if validator:
                 status_from_validate = validator.validate(detections)
 
-            # Draw annotations on frame
+            # Draw annotations on frame (Disabled OpenCV drawing, handled in frontend)
             annotated = frame
-            if detector and detections:
-                annotated = detector.draw_detections(
-                    frame, detections,
-                    gauge_classes=gauge_class_names,
-                    part_classes=part_class_names,
-                    show_conf=show_confidence_score,
-                )
 
             # Store results (thread-safe)
             with frame_lock:
@@ -249,12 +285,27 @@ def inference_loop():
                 status["detector_available"] = detector.is_available if detector else False
                 status["camera_connected"] = camera.is_connected if camera else False
                 status["inference_fps"] = _live_fps
+                status["raw_detections"] = detections
+                status["frame_width"] = frame.shape[1] if frame is not None else 1280
+                status["frame_height"] = frame.shape[0] if frame is not None else 720
+                status["show_confidence_score"] = show_confidence_score
                 if status.get("glove_warning"):
                     logger.warning(f"[BROADCAST] glove_warning=True being sent to frontend!")
                 with status_lock:
                     latest_status = status
 
-            # No sleep — run as fast as GPU allows
+            if enable_pacing:
+                state = "IDLE"
+                if validator and 'status' in locals() and status:
+                    state = status.get("inspection_state", "IDLE")
+
+                if state in ("IDLE", "COMPLETE"):
+                    idle_fps = 5.0
+                    elapsed_loop_time = time.time() - loop_start_time
+                    sleep_time = (1.0 / idle_fps) - elapsed_loop_time
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                # If state is INSPECTING, it bypasses sleep and runs at full speed.
 
         except Exception as e:
             logger.error(f"Inference loop error: {e}")
@@ -442,6 +493,84 @@ async def toggle_confidence(body: ConfidenceToggle):
     show_confidence_score = body.show
     logger.info(f"Show confidence score: {show_confidence_score}")
     return JSONResponse({"status": "ok", "show_confidence_score": show_confidence_score})
+
+class PacingToggle(BaseModel):
+    enable: bool
+
+@app.post("/settings/pacing")
+async def toggle_pacing(body: PacingToggle):
+    """Toggle the inference frame pacing."""
+    global enable_pacing
+    enable_pacing = body.enable
+    logger.info(f"Enable pacing: {enable_pacing}")
+    return JSONResponse({"status": "ok", "enable_pacing": enable_pacing})
+
+class GaugeConfigUpdate(BaseModel):
+    id: int
+    method: str
+    overlap_threshold: float
+    near_distance_threshold: int
+
+class SettingsUpdate(BaseModel):
+    confidence_threshold: float
+    overlap_threshold: float
+    near_distance_threshold: int
+    ok_hold_seconds: float
+    gauge_configs: Optional[List[GaugeConfigUpdate]] = None
+    visual_deadzone: Optional[List[int]] = None
+
+@app.get("/settings")
+async def get_settings_endpoint():
+    """Get the current dynamic AI thresholds."""
+    gauge_configs = []
+    if validator:
+        for cp_id, cp_conf in validator._checkpoint_configs.items():
+            gauge_configs.append({
+                "id": cp_id,
+                "name": cp_conf["name"],
+                "method": cp_conf.get("method", "near"),
+                "overlap_threshold": cp_conf.get("overlap_threshold", validator.overlap_threshold),
+                "near_distance_threshold": cp_conf.get("near_distance_threshold", validator.near_distance_threshold),
+            })
+            
+    return JSONResponse({
+        "confidence_threshold": detector.confidence_threshold if detector else config.CONFIDENCE_THRESHOLD,
+        "overlap_threshold": validator.overlap_threshold if validator else config.OVERLAP_THRESHOLD,
+        "near_distance_threshold": validator.near_distance_threshold if validator else config.NEAR_DISTANCE_THRESHOLD,
+        "ok_hold_seconds": validator.ok_hold_seconds if validator else config.OK_HOLD_SECONDS,
+        "gauge_configs": gauge_configs,
+        "visual_deadzone": detector.deadzone if detector else None
+    })
+
+@app.post("/settings")
+async def update_settings_endpoint(settings: SettingsUpdate):
+    """Update dynamic AI thresholds in memory and save to file."""
+    if detector:
+        detector.confidence_threshold = settings.confidence_threshold
+        detector.deadzone = settings.visual_deadzone
+    if validator:
+        validator.overlap_threshold = settings.overlap_threshold
+        validator.near_distance_threshold = settings.near_distance_threshold
+        validator.ok_hold_seconds = settings.ok_hold_seconds
+        
+        if settings.gauge_configs:
+            for g_conf in settings.gauge_configs:
+                if g_conf.id in validator._checkpoint_configs:
+                    validator._checkpoint_configs[g_conf.id]["method"] = g_conf.method
+                    validator._checkpoint_configs[g_conf.id]["overlap_threshold"] = g_conf.overlap_threshold
+                    validator._checkpoint_configs[g_conf.id]["near_distance_threshold"] = g_conf.near_distance_threshold
+        
+    save_settings({
+        "confidence_threshold": settings.confidence_threshold,
+        "overlap_threshold": settings.overlap_threshold,
+        "near_distance_threshold": settings.near_distance_threshold,
+        "ok_hold_seconds": settings.ok_hold_seconds,
+        "gauge_configs": [g.dict() for g in settings.gauge_configs] if settings.gauge_configs else [],
+        "visual_deadzone": settings.visual_deadzone
+    })
+    
+    logger.info(f"Settings updated: {settings.dict()}")
+    return JSONResponse({"status": "ok"})
 
 
 # ─── WebSocket — Status Updates ───────────────────────────────────────────────
