@@ -150,9 +150,19 @@ class GaugeValidator:
 
         # Part memory (for occlusion handling)
         self._last_known_parts: Dict[str, List[int]] = {}
+        
+        # Memory of completed gauges for returning parts
+        self.part_memory: Dict[str, Set[int]] = {}
 
     def set_part_no(self, part_no: str):
         self.scanned_part_no = part_no
+        # Restore memory if we are already inspecting
+        if part_no in self.part_memory and self.inspection_state == InspectionState.INSPECTING:
+            logger.info(f"Restoring memory for part {part_no}")
+            for cp_id in self.part_memory[part_no]:
+                if cp_id in self.checkpoints:
+                    self.checkpoints[cp_id].status = GaugeStatus.OK
+                    self.checkpoints[cp_id].dwell_progress = 1.0
 
     # ─── Public API ──────────────────────────────────────────────────────
 
@@ -295,16 +305,27 @@ class GaugeValidator:
           accumulation for that frame (treating Dia as if it were absent).
         """
         # ── Pin / Dia mutual-exclusion pre-check ──────────────────────────
-        # Detect whether Pin is currently overlapping the part so the Dia
-        # checkpoint can be suppressed in the same frame.
-        pin_inside_part = False
-        if "Pin" in gauge_detections and "Part" in part_detections:
+        # Detect whether Pin is on top of the DS Thread and Dia is inside the Part
+        # so the Dia checkpoint can be suppressed in the same frame.
+        pin_on_ds_thread = False
+        if "Pin" in gauge_detections and "DS Thread" in part_detections:
             best_pin  = max(gauge_detections["Pin"],  key=lambda d: d["confidence"])
-            best_part = max(part_detections["Part"],   key=lambda d: d["confidence"])
+            best_ds_thread = max(part_detections["DS Thread"],   key=lambda d: d["confidence"])
             _pin_valid, _ = self._evaluate_spatial(
-                best_pin["bbox"], best_part["bbox"], "intersects"
+                best_pin["bbox"], best_ds_thread["bbox"], "intersects"
             )
-            pin_inside_part = _pin_valid
+            pin_on_ds_thread = _pin_valid
+
+        dia_inside_part = False
+        if "Dia" in gauge_detections and "Part" in part_detections:
+            best_dia  = max(gauge_detections["Dia"],  key=lambda d: d["confidence"])
+            best_part = max(part_detections["Part"],   key=lambda d: d["confidence"])
+            _dia_valid, _ = self._evaluate_spatial(
+                best_dia["bbox"], best_part["bbox"], "intersects"
+            )
+            dia_inside_part = _dia_valid
+            
+        suppress_dia = pin_on_ds_thread and dia_inside_part
 
         for cp_id, config in self._checkpoint_configs.items():
             result = self.checkpoints[cp_id]
@@ -350,12 +371,12 @@ class GaugeValidator:
                 continue
 
             # ── Pin / Dia mutual-exclusion ────────────────────────────────
-            # If Pin is currently inside the part AND this checkpoint is Dia,
+            # If Pin is on DS Thread AND Dia is inside Part,
             # treat Dia as absent for this frame so it cannot falsely latch
             # while the operator is using it to assist with pin insertion.
-            if gauge_class == "Dia" and pin_inside_part:
+            if gauge_class == "Dia" and suppress_dia:
                 logger.debug(
-                    "[Dia suppressed] Pin is simultaneously inside Part — "
+                    "[Dia suppressed] Pin is on DS Thread and Dia is inside Part — "
                     "Dia dwell blocked this frame."
                 )
                 self._handle_missing(result, GaugeStatus.NO_GAUGE)
@@ -551,6 +572,7 @@ class GaugeValidator:
             "model": "DFP6",
             "overall_status": overall.value,
             "inspection_state": self.inspection_state.value,
+            "scanned_part_no": self.scanned_part_no,
             "completed": completed,
             "total": total,
             "gauges": gauges,
@@ -574,12 +596,25 @@ class GaugeValidator:
 
     def _reset_checkpoints(self) -> None:
         """Clear all per-checkpoint runtime state."""
-        for result in self.checkpoints.values():
-            result.status = GaugeStatus.PENDING
-            result.confidence = 0.0
-            result.overlap = 0.0
-            result.ok_count = 0
-            result.grace_count = 0
+        remembered_cps = set()
+        if self.scanned_part_no and self.scanned_part_no in self.part_memory:
+            remembered_cps = self.part_memory[self.scanned_part_no]
+
+        for cp_id, result in self.checkpoints.items():
+            if cp_id in remembered_cps:
+                result.status = GaugeStatus.OK
+                result.confidence = 0.0
+                result.overlap = 0.0
+                result.dwell_progress = 1.0
+                result.ok_count = 0
+                result.grace_count = 0
+            else:
+                result.status = GaugeStatus.PENDING
+                result.confidence = 0.0
+                result.overlap = 0.0
+                result.dwell_progress = 0.0
+                result.ok_count = 0
+                result.grace_count = 0
             
         # Clear part memory for the new session
         self._last_known_parts.clear()
@@ -605,8 +640,14 @@ class GaugeValidator:
                 result_str = f"Not checked: {', '.join(missing)}"
             else:
                 result_str = "NG"
+                
+            if self.scanned_part_no:
+                completed_cps = {cp.checkpoint_id for cp in self.checkpoints.values() if cp.status == GaugeStatus.OK}
+                self.part_memory[self.scanned_part_no] = completed_cps
         else:
             result_str = "OK"
+            if self.scanned_part_no:
+                self.part_memory.pop(self.scanned_part_no, None)
 
         log = InspectionLog(
             log_id=self._log_counter,

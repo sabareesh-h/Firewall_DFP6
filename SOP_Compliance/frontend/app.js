@@ -22,13 +22,23 @@ let currentSource = 'video';
 
 // ─── Gauge Definitions (must match config.py GAUGE_CHECKPOINTS) ─────────
 const GAUGE_NAMES = {
-    1: 'Distance',
-    2: 'Pin',
-    3: 'Dia',
-    4: 'M6',
-    5: 'M8',
-    6: '11mm',
-    7: '13mm',
+    1: 'Distance Gauge',
+    2: 'Pin Gauge',
+    3: 'Dia Gauge',
+    4: 'M6 Thread',
+    5: 'M8 Thread',
+    6: '11mm Gauge',
+    7: '13mm Gauge',
+};
+
+const GAUGE_IMAGES = {
+    1: 'Distance.png',
+    2: 'Pin Gauge.png',
+    3: 'Dia Gauge.png',
+    4: 'M6 Gauge.png',
+    5: 'M8 Gauge.png',
+    6: '11mm Gauge.png',
+    7: '13mm Gauge.png',
 };
 
 // ─── Initialize ─────────────────────────────────────────────────────────────
@@ -234,6 +244,15 @@ function handleStatusUpdate(data) {
     updateHeaderStatuses(data.detector_available, data.camera_connected);
     updateSafetyWarning(data.glove_warning);
 
+    const partNoEl = document.getElementById('scanned-part-no');
+    if (partNoEl) {
+        if (data.scanned_part_no) {
+            partNoEl.textContent = data.scanned_part_no;
+        } else {
+            partNoEl.textContent = '--';
+        }
+    }
+
     if (data.source) {
         currentSource = data.source;
         updateSourceButtons(data.source);
@@ -254,15 +273,15 @@ function initGaugeList() {
         item.id = `gauge-item-${id}`;
         item.setAttribute('data-status', 'NOT_CHECKED');
 
-        const imageName = name === 'Distance' ? 'Distance.png' : `${name} Gauge.png`;
-        const imageHtml = `<img src="/reference_images/${imageName}" alt="${name} Gauge" style="max-height: 24px; max-width: 36px; object-fit: contain;" />`;
+        const imageName = GAUGE_IMAGES[id];
+        const imageHtml = `<img src="/reference_images/${imageName}" alt="${name}" style="max-height: 24px; max-width: 36px; object-fit: contain;" />`;
 
         item.innerHTML = `
             <span class="gauge-num" style="width: 24px; height: 24px; font-size: 12px; flex-shrink: 0;">${id}</span>
-            <div style="flex: 1; display: flex; justify-content: center; align-items: center;">
+            <div style="width: 50px; display: flex; justify-content: center; align-items: center; flex-shrink: 0; margin-left: 8px;">
                 ${imageHtml}
             </div>
-            <div class="gauge-name" style="font-size: 14px; font-weight: 700; flex-shrink: 0; text-align: right;">${name}</div>
+            <div class="gauge-name" style="flex: 1; font-size: 14px; font-weight: 700; text-align: right;">${name}</div>
         `;
 
         container.appendChild(item);
@@ -304,8 +323,8 @@ function updateGauges(gauges) {
         const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
         progressFill.style.width = pct + '%';
         progressFill.style.background = completed === total
-            ? 'var(--status-ok)'
-            : 'linear-gradient(90deg, var(--accent-blue), var(--status-ok))';
+            ? 'var(--ok)'
+            : 'linear-gradient(90deg, var(--accent), var(--ok))';
     }
 }
 
@@ -319,9 +338,9 @@ function updateInspectionState(state) {
         INSPECTING: '\u25cf  Inspection in Progress',
         COMPLETE:   '\u2713  Complete \u2014 Remove Part',
     };
-    const colors = { IDLE: '#7f8c8d', INSPECTING: '#f39c12', COMPLETE: '#2ecc71' };
+    const colors = { IDLE: '#94a3b8', INSPECTING: '#d97706', COMPLETE: '#16a34a' };
     stateEl.textContent = labels[state] || (state || '');
-    stateEl.style.color = colors[state] || '#ccc';
+    stateEl.style.color = colors[state] || '#94a3b8';
 }
 
 // ─── Overall Result ──────────────────────────────────────────────────────────
@@ -338,11 +357,11 @@ function updateOverallResult(status, inspectionState, completed, total) {
 
     if (inspectionState === 'IDLE' || status === 'WAITING') {
         statusEl.textContent = 'Waiting for Part';
-        statusEl.style.color = '#7f8c8d';
+        statusEl.style.color = '#94a3b8';
         iconEl.innerHTML = `
             <svg class="result-svg" viewBox="0 0 60 60">
-                <circle cx="30" cy="30" r="26" fill="none" stroke="#555" stroke-width="3" stroke-dasharray="5,5"/>
-                <text x="30" y="37" text-anchor="middle" fill="#555" font-size="20" font-family="Inter">⏳</text>
+                <circle cx="30" cy="30" r="26" fill="none" stroke="#cbd5e1" stroke-width="2.5" stroke-dasharray="5,5"/>
+                <text x="30" y="37" text-anchor="middle" fill="#94a3b8" font-size="20" font-family="Inter">⏳</text>
             </svg>`;
         if (detailEl) detailEl.textContent = 'Place part on table to begin';
         return;
@@ -354,8 +373,8 @@ function updateOverallResult(status, inspectionState, completed, total) {
         statusEl.textContent = 'PASS';
         iconEl.innerHTML = `
             <svg class="result-svg" viewBox="0 0 60 60">
-                <circle cx="30" cy="30" r="26" fill="rgba(46,204,113,0.15)" stroke="#2ecc71" stroke-width="3"/>
-                <path d="M18 30 L26 38 L42 22" fill="none" stroke="#2ecc71" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="30" cy="30" r="26" fill="rgba(22,163,74,0.10)" stroke="#16a34a" stroke-width="2.5"/>
+                <path d="M18 30 L26 38 L42 22" fill="none" stroke="#16a34a" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>`;
     } else if (status === 'NG') {
         card.classList.add('status-ng');
@@ -363,8 +382,8 @@ function updateOverallResult(status, inspectionState, completed, total) {
         statusEl.textContent = 'FAIL';
         iconEl.innerHTML = `
             <svg class="result-svg" viewBox="0 0 60 60">
-                <circle cx="30" cy="30" r="26" fill="rgba(231,76,60,0.15)" stroke="#e74c3c" stroke-width="3"/>
-                <path d="M20 20 L40 40 M40 20 L20 40" fill="none" stroke="#e74c3c" stroke-width="3.5" stroke-linecap="round"/>
+                <circle cx="30" cy="30" r="26" fill="rgba(220,38,38,0.08)" stroke="#dc2626" stroke-width="2.5"/>
+                <path d="M20 20 L40 40 M40 20 L20 40" fill="none" stroke="#dc2626" stroke-width="3.5" stroke-linecap="round"/>
             </svg>`;
     } else {
         card.classList.add('status-progress');
@@ -372,10 +391,10 @@ function updateOverallResult(status, inspectionState, completed, total) {
         statusEl.textContent = 'Under Progress';
         iconEl.innerHTML = `
             <svg class="result-svg" viewBox="0 0 60 60">
-                <circle cx="30" cy="30" r="26" fill="rgba(243,156,18,0.15)" stroke="#f39c12" stroke-width="3" stroke-dasharray="8,4">
+                <circle cx="30" cy="30" r="26" fill="rgba(37,99,235,0.06)" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="8,4">
                     <animateTransform attributeName="transform" type="rotate" from="0 30 30" to="360 30 30" dur="8s" repeatCount="indefinite"/>
                 </circle>
-                <text x="30" y="35" text-anchor="middle" fill="#f39c12" font-size="16" font-weight="bold" font-family="Inter">⟳</text>
+                <text x="30" y="35" text-anchor="middle" fill="#2563eb" font-size="16" font-weight="bold" font-family="Inter">⟳</text>
             </svg>`;
     }
 
@@ -435,10 +454,10 @@ function updateSystemStatus(connected) {
 
     if (connected) {
         indicator.innerHTML = '<span class="status-dot online"></span><span class="status-label">System Online</span>';
-        indicator.style.borderColor = 'rgba(46, 204, 113, 0.3)';
+        indicator.style.borderColor = 'rgba(22, 163, 74, 0.20)';
     } else {
-        indicator.innerHTML = '<span class="status-dot offline"></span><span class="status-label" style="color:var(--status-ng)">Disconnected</span>';
-        indicator.style.borderColor = 'rgba(231, 76, 60, 0.3)';
+        indicator.innerHTML = '<span class="status-dot offline"></span><span class="status-label" style="color:var(--ng)">Disconnected</span>';
+        indicator.style.borderColor = 'rgba(220, 38, 38, 0.20)';
     }
 }
 

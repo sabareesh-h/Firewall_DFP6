@@ -136,22 +136,22 @@ GAUGE_CHECKPOINTS = [
         "name": "11mm Gauge",
         "gauge_class": "11mm",
         "part_class": "Out",
-        "method": "intersects",
-        "description": "11mm Gauge overlapping Outlet",
+        "method": "near",
+        "description": "11mm Gauge near Outlet",
     },
     {
         "id": 7,
         "name": "13mm Gauge",
         "gauge_class": "13mm",
         "part_class": "In",
-        "method": "intersects",
-        "description": "13mm Gauge overlapping Inlet",
+        "method": "near",
+        "description": "13mm Gauge near Inlet",
     },
 ]
 
 # ─── Validation Thresholds ───────────────────────────────────────────────────
 OVERLAP_THRESHOLD = 0.15          # Minimum IoU for "intersects" / "overlap" method
-NEAR_DISTANCE_THRESHOLD = 50    # Max pixel distance for "near" method
+NEAR_DISTANCE_THRESHOLD = 150    # Max pixel distance for "near" method
 OK_HOLD_FRAMES = 3               # Consecutive OK frames needed to latch a gauge as checked (kept for fallback)
 OK_HOLD_SECONDS = 0.1            # Seconds gauge must stay valid on part before latching as checked
 
