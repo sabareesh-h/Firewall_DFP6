@@ -236,6 +236,10 @@ def inference_loop():
     _fps_frame_count = 0
     _fps_last_time   = time.time()
     _live_fps        = 0.0
+    
+    # State tracking for smart pacing
+    _last_state = "IDLE"
+    _state_change_time = time.time()
 
     while inference_running:
         loop_start_time = time.time()
@@ -300,13 +304,30 @@ def inference_loop():
                 if validator and 'status' in locals() and status:
                     state = status.get("inspection_state", "IDLE")
 
-                if state in ("IDLE", "COMPLETE"):
-                    idle_fps = 5.0
+                if state != _last_state:
+                    _last_state = state
+                    _state_change_time = time.time()
+                
+                time_in_state = time.time() - _state_change_time
+
+                if state == "COMPLETE":
+                    if time_in_state < 2.0:
+                        idle_fps = 0.0  # Full speed for 2 seconds
+                    else:
+                        idle_fps = 5.0
+                elif state == "IDLE":
+                    if time_in_state > 60.0:
+                        idle_fps = 1.0  # Ultra-low power after 1 min idle
+                    else:
+                        idle_fps = 5.0
+                else: # INSPECTING
+                    idle_fps = 0.0  # Full speed
+
+                if idle_fps > 0.0:
                     elapsed_loop_time = time.time() - loop_start_time
                     sleep_time = (1.0 / idle_fps) - elapsed_loop_time
                     if sleep_time > 0:
                         time.sleep(sleep_time)
-                # If state is INSPECTING, it bypasses sleep and runs at full speed.
 
         except Exception as e:
             logger.error(f"Inference loop error: {e}")

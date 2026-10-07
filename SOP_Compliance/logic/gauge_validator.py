@@ -208,6 +208,16 @@ class GaugeValidator:
             for det in sorted_11[1:]:
                 det["class_name"] = "13mm"
                 gauge_detections.setdefault("13mm", []).append(det)
+                
+        # If there is only ONE 13mm detection but its confidence is low, it's likely the 11mm gauge faking it
+        # (The true 13mm gauge on the table usually has high confidence > 0.60)
+        if "13mm" in gauge_detections and len(gauge_detections["13mm"]) == 1:
+            if gauge_detections["13mm"][0]["confidence"] < 0.55:
+                det = gauge_detections["13mm"].pop(0)
+                det["class_name"] = "11mm"
+                gauge_detections.setdefault("11mm", []).append(det)
+                if not gauge_detections["13mm"]:
+                    del gauge_detections["13mm"]
 
         # ── Step 1: Part-presence state machine ──────────────────────────
         tml_present = "Part" in part_detections
@@ -407,41 +417,6 @@ class GaugeValidator:
 
             best_gauge = max(gauge_detections[gauge_class], key=lambda d: d["confidence"])
             
-            # ── Smart Movement Check for 11mm / 13mm ────────────────────
-            if gauge_class in ["11mm", "13mm"]:
-                curr_pos = self._center(best_gauge["bbox"])
-                
-                if gauge_class not in self._gauge_history:
-                    self._gauge_history[gauge_class] = []
-                
-                history = self._gauge_history[gauge_class]
-                history.append(curr_pos)
-                if len(history) > 5:
-                    history.pop(0)
-                
-                # If gauge has been stationary for the last 5 frames, update its resting spot
-                if len(history) == 5:
-                    max_dist = 0
-                    for p1 in history:
-                        for p2 in history:
-                            d = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
-                            if d > max_dist:
-                                max_dist = d
-                                
-                    if max_dist < 20: # Stable/stationary
-                        avg_x = sum(p[0] for p in history) / 5
-                        avg_y = sum(p[1] for p in history) / 5
-                        self._resting_positions[gauge_class] = (avg_x, avg_y)
-
-                # Ensure it has moved away from its last known resting spot
-                if gauge_class in self._resting_positions:
-                    rest_x, rest_y = self._resting_positions[gauge_class]
-                    dist_moved = ((curr_pos[0] - rest_x)**2 + (curr_pos[1] - rest_y)**2)**0.5
-                    
-                    if dist_moved < 30:  # Just has to move slightly from its resting spot
-                        self._handle_missing(result, GaugeStatus.WAITING)
-                        continue
-
             if part_visible:
                 best_part  = max(part_detections[part_class],  key=lambda d: d["confidence"])
                 part_bbox = best_part["bbox"]
@@ -457,6 +432,34 @@ class GaugeValidator:
             is_valid, overlap = self._evaluate_spatial(
                 best_gauge["bbox"], part_bbox, method, overlap_thresh, near_thresh
             )
+
+            # ── Smart Movement Check for 11mm / 13mm ────────────────────
+            if gauge_class in ["11mm", "13mm"]:
+                curr_pos = self._center(best_gauge["bbox"])
+                
+                if gauge_class not in self._gauge_history:
+                    self._gauge_history[gauge_class] = []
+                
+                history = self._gauge_history[gauge_class]
+                history.append(curr_pos)
+                if len(history) > 5:
+                    history.pop(0)
+                
+                # ONLY update resting spot if it is NOT currently interacting with the part
+                if not is_valid and len(history) == 5:
+                    max_dist = max(((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5 for p1 in history for p2 in history)
+                    if max_dist < 20: # Stable/stationary
+                        avg_x = sum(p[0] for p in history) / 5
+                        avg_y = sum(p[1] for p in history) / 5
+                        self._resting_positions[gauge_class] = (avg_x, avg_y)
+
+                # Ensure it has moved away from its last known resting spot
+                if gauge_class in self._resting_positions:
+                    rest_x, rest_y = self._resting_positions[gauge_class]
+                    dist_moved = ((curr_pos[0] - rest_x)**2 + (curr_pos[1] - rest_y)**2)**0.5
+                    
+                    if dist_moved < 30:  # Hasn't moved from resting spot
+                        is_valid = False # Overrule the spatial check!
 
             result.confidence = best_gauge["confidence"]
             result.overlap = overlap

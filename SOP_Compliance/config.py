@@ -11,7 +11,7 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "best_v2.pt")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 # Default video file for testing
-DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-29 110701.mp4"
+DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-24 155434.mp4"
 # Hikvision Camera URL
 # RTSP (raw stream):  rtsp://admin:Wedit@2024@192.168.1.66:554/Streaming/Channels/101
 # HTTP (browser-like): http://admin:Wedit@2024@192.168.1.66/Streaming/Channels/101/httppreview
@@ -33,7 +33,7 @@ LIVE_IMGSZ = 1024
 MODEL_ENGINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "best.engine")
 
 # ─── Class Definitions ───────────────────────────────────────────────────────
-# Gauge classes (things the operator holds / uses)
+# Gauge classes (things the operator holds / us 1qwees)
 GAUGE_CLASSES = {
     0: "Distance",
     1: "Pin",
