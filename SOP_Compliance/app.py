@@ -146,7 +146,8 @@ async def lifespan(app: FastAPI):
         ok_hold_frames=config.OK_HOLD_FRAMES,
         ok_hold_seconds=validator_hold,
         gauge_grace_frames=config.GAUGE_GRACE_FRAMES,
-        part_absent_patience=config.PART_ABSENT_PATIENCE,
+        part_clear_time_complete=config.PART_CLEAR_TIME_COMPLETE,
+        part_clear_time_inspecting=config.PART_CLEAR_TIME_INSPECTING,
     )
     
     if "gauge_configs" in saved_settings and saved_settings["gauge_configs"]:
@@ -570,6 +571,37 @@ async def update_settings_endpoint(settings: SettingsUpdate):
     })
     
     logger.info(f"Settings updated: {settings.dict()}")
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/settings/reset")
+async def reset_settings_endpoint():
+    """Reset settings to default."""
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            os.remove(SETTINGS_FILE)
+        except Exception as e:
+            logger.error(f"Failed to delete settings.json: {e}")
+            
+    # Reset in-memory values
+    if detector:
+        detector.confidence_threshold = config.CONFIDENCE_THRESHOLD
+        detector.deadzone = None
+    if validator:
+        validator.overlap_threshold = config.OVERLAP_THRESHOLD
+        validator.near_distance_threshold = config.NEAR_DISTANCE_THRESHOLD
+        validator.ok_hold_seconds = config.OK_HOLD_SECONDS
+        
+        # Reset gauge configs from config.GAUGE_CHECKPOINTS
+        for cp in config.GAUGE_CHECKPOINTS:
+            cp_id = cp["id"]
+            if cp_id in validator._checkpoint_configs:
+                validator._checkpoint_configs[cp_id]["method"] = cp.get("method", "near")
+                if "overlap_threshold" in validator._checkpoint_configs[cp_id]:
+                    del validator._checkpoint_configs[cp_id]["overlap_threshold"]
+                if "near_distance_threshold" in validator._checkpoint_configs[cp_id]:
+                    del validator._checkpoint_configs[cp_id]["near_distance_threshold"]
+                
     return JSONResponse({"status": "ok"})
 
 

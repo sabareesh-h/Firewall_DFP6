@@ -111,14 +111,16 @@ class GaugeValidator:
         ok_hold_frames: int = 3,
         ok_hold_seconds: float = 2.0,
         gauge_grace_frames: int = 15,
-        part_absent_patience: int = 45,
+        part_clear_time_complete: float = 2.0,
+        part_clear_time_inspecting: float = 60.0,
     ):
         self.overlap_threshold = overlap_threshold
         self.near_distance_threshold = near_distance_threshold
         self.ok_hold_frames = ok_hold_frames
         self.ok_hold_seconds = ok_hold_seconds
         self.gauge_grace_frames = gauge_grace_frames
-        self.part_absent_patience = part_absent_patience
+        self.part_clear_time_complete = part_clear_time_complete
+        self.part_clear_time_inspecting = part_clear_time_inspecting
 
         self._checkpoint_configs = {cp["id"]: cp for cp in checkpoints}
         self.checkpoints: Dict[int, CheckpointResult] = {}
@@ -131,7 +133,7 @@ class GaugeValidator:
 
         # Part-presence state machine
         self.inspection_state = InspectionState.IDLE
-        self._part_absent_frames = 0   # how many consecutive frames TML Part missing
+        self._part_absent_start_time = 0.0   # 0.0 means part is currently present or not tracked
         self._part_present_frames = 0  # how many consecutive frames TML Part visible
 
         # Production tracking
@@ -150,6 +152,8 @@ class GaugeValidator:
 
         # Part memory (for occlusion handling)
         self._last_known_parts: Dict[str, List[int]] = {}
+        self._resting_positions: Dict[str, Tuple[float, float]] = {}
+        self._gauge_history: Dict[str, List[Tuple[float, float]]] = {}
         
         # Memory of completed gauges for returning parts
         self.part_memory: Dict[str, Set[int]] = {}
@@ -233,7 +237,7 @@ class GaugeValidator:
 
         self._reset_checkpoints()
         self.inspection_state = InspectionState.IDLE
-        self._part_absent_frames = 0
+        self._part_absent_start_time = 0.0
         self._part_present_frames = 0
         logger.info("Inspection manually reset.")
         return self._build_status()
@@ -247,39 +251,55 @@ class GaugeValidator:
         """
         Track TML Part presence to drive inspection sessions.
 
-        Uses patience counters to avoid false triggers on YOLO misses.
+        Uses time-based patience to avoid false triggers and handle variable FPS.
         """
+        now = time.time()
         if tml_present:
             self._part_present_frames += 1
-            self._part_absent_frames = 0
+            self._part_absent_start_time = 0.0
 
             # Part just arrived → start new session
             if self.inspection_state == InspectionState.IDLE:
                 if self._part_present_frames >= 5:   # 5 frames to confirm arrival
                     self.inspection_state = InspectionState.INSPECTING
                     self._reset_checkpoints()
-                    self._session_start_time = time.time()
+                    self._session_start_time = now
                     logger.info("TML Part detected — inspection session started.")
 
         else:
             # Part not in this frame
             self._part_present_frames = 0
-            self._part_absent_frames += 1
+            
+            if self._part_absent_start_time == 0.0:
+                self._part_absent_start_time = now
 
-            if self.inspection_state in (InspectionState.INSPECTING,
-                                         InspectionState.COMPLETE):
-                if self._part_absent_frames >= self.part_absent_patience:
-                    # Part has been absent long enough → treat as removed
+            absent_duration = now - self._part_absent_start_time
+
+            if self.inspection_state == InspectionState.INSPECTING:
+                if absent_duration >= self.part_clear_time_inspecting:
+                    # Part has been absent long enough during inspection → treat as removed early
                     overall = self._compute_overall()
-                    result_str = "OK" if self.inspection_state == InspectionState.COMPLETE else "NG"
-                    self._add_log(result_str)
+                    self._add_log("NG")
                     logger.info(
-                        f"TML Part removed. Logging result: {result_str}. "
+                        f"TML Part removed before completion. Logging NG. "
                         f"Resetting for next part."
                     )
                     self._reset_checkpoints()
                     self.inspection_state = InspectionState.IDLE
-                    self._part_absent_frames = 0
+                    self._part_absent_start_time = 0.0
+
+            elif self.inspection_state == InspectionState.COMPLETE:
+                if absent_duration >= self.part_clear_time_complete:
+                    # Part has been absent long enough after completion → treat as removed properly
+                    overall = self._compute_overall()
+                    self._add_log("OK")
+                    logger.info(
+                        f"TML Part removed. Logging OK. "
+                        f"Resetting for next part."
+                    )
+                    self._reset_checkpoints()
+                    self.inspection_state = InspectionState.IDLE
+                    self._part_absent_start_time = 0.0
 
     # ─── Gauge Validation ────────────────────────────────────────────────
 
@@ -387,6 +407,41 @@ class GaugeValidator:
 
             best_gauge = max(gauge_detections[gauge_class], key=lambda d: d["confidence"])
             
+            # ── Smart Movement Check for 11mm / 13mm ────────────────────
+            if gauge_class in ["11mm", "13mm"]:
+                curr_pos = self._center(best_gauge["bbox"])
+                
+                if gauge_class not in self._gauge_history:
+                    self._gauge_history[gauge_class] = []
+                
+                history = self._gauge_history[gauge_class]
+                history.append(curr_pos)
+                if len(history) > 5:
+                    history.pop(0)
+                
+                # If gauge has been stationary for the last 5 frames, update its resting spot
+                if len(history) == 5:
+                    max_dist = 0
+                    for p1 in history:
+                        for p2 in history:
+                            d = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
+                            if d > max_dist:
+                                max_dist = d
+                                
+                    if max_dist < 20: # Stable/stationary
+                        avg_x = sum(p[0] for p in history) / 5
+                        avg_y = sum(p[1] for p in history) / 5
+                        self._resting_positions[gauge_class] = (avg_x, avg_y)
+
+                # Ensure it has moved away from its last known resting spot
+                if gauge_class in self._resting_positions:
+                    rest_x, rest_y = self._resting_positions[gauge_class]
+                    dist_moved = ((curr_pos[0] - rest_x)**2 + (curr_pos[1] - rest_y)**2)**0.5
+                    
+                    if dist_moved < 30:  # Just has to move slightly from its resting spot
+                        self._handle_missing(result, GaugeStatus.WAITING)
+                        continue
+
             if part_visible:
                 best_part  = max(part_detections[part_class],  key=lambda d: d["confidence"])
                 part_bbox = best_part["bbox"]
@@ -626,6 +681,8 @@ class GaugeValidator:
             
         # Clear part memory for the new session
         self._last_known_parts.clear()
+        self._resting_positions.clear()
+        self._gauge_history.clear()
 
     def _add_log(self, result: str) -> None:
         """Record a completed inspection and update production counters."""

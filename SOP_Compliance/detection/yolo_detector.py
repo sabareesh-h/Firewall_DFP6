@@ -231,9 +231,15 @@ class YOLODetector:
                     conf   = float(box.conf[0])
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
                     
+                    import config as _cfg
+                    ignore_x = getattr(_cfg, "IGNORE_LEFT_OF_X", None)
+                    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                    
+                    if ignore_x is not None and cx < ignore_x:
+                        continue
+                    
                     if self.deadzone and len(self.deadzone) == 4:
                         dx1, dy1, dx2, dy2 = self.deadzone
-                        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
                         if dx1 <= cx <= dx2 and dy1 <= cy <= dy2:
                             continue
 

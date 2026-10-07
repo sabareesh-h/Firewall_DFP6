@@ -11,7 +11,7 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "best_v2.pt")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 # Default video file for testing
-DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-24 155434.mp4"
+DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-29 110701.mp4"
 # Hikvision Camera URL
 # RTSP (raw stream):  rtsp://admin:Wedit@2024@192.168.1.66:554/Streaming/Channels/101
 # HTTP (browser-like): http://admin:Wedit@2024@192.168.1.66/Streaming/Channels/101/httppreview
@@ -152,6 +152,7 @@ GAUGE_CHECKPOINTS = [
 # ─── Validation Thresholds ───────────────────────────────────────────────────
 OVERLAP_THRESHOLD = 0.15          # Minimum IoU for "intersects" / "overlap" method
 NEAR_DISTANCE_THRESHOLD = 50    # Max pixel distance for "near" method
+IGNORE_LEFT_OF_X = 320          # Ignore all detections whose center X is less than this value
 OK_HOLD_FRAMES = 3               # Consecutive OK frames needed to latch a gauge as checked (kept for fallback)
 OK_HOLD_SECONDS = 0.1            # Seconds gauge must stay valid on part before latching as checked
 
@@ -160,9 +161,12 @@ OK_HOLD_SECONDS = 0.1            # Seconds gauge must stay valid on part before 
 # preserve its ok_count for this many frames before treating it as absent.
 GAUGE_GRACE_FRAMES = 15          # ~0.5s grace — gauge stays "in progress" when moved away
 
-# Frames TML Part must be absent before we treat it as "part removed"
+# Time (in seconds) TML Part must be absent before we treat it as "part removed"
 # (operator removed the part from the table → auto-log + reset)
-PART_ABSENT_PATIENCE = 45        # ~1.5s absent before auto-reset
+# COMPLETE: fast reset after part is checked and removed.
+PART_CLEAR_TIME_COMPLETE = 3.0
+# INSPECTING: allows for 2-3 seconds of operator occlusion before resetting.
+PART_CLEAR_TIME_INSPECTING = 3.0
 
 # ─── Video Source ─────────────────────────────────────────────────────────────
 # "live" | "video" | "demo"

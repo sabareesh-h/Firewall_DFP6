@@ -345,15 +345,12 @@ function updateSmartOverlays(data) {
         if (det.class_name === 'Part' || det.class_name === 'Hand' || !isGauge) {
             box.className = 'smart-box idle-part';
             if (det.class_name === 'Hand') {
-                box.style.borderColor = 'rgba(220, 38, 38, 0.6)';
-                labelDiv.style.background = 'rgba(220, 38, 38, 0.9)';
+                box.style.borderColor = 'rgba(220, 38, 38, 0.4)';
+                labelDiv.style.background = 'rgba(220, 38, 38, 0.6)';
             }
         } else {
             // It's a Gauge
-            if (gaugeStatus === 'OK' && dwellProgress >= 1.0) {
-                box.className = 'smart-box success';
-                labelDiv.innerHTML = `✅`;
-            } else if (dwellProgress > 0 || gaugeStatus === 'UNCERTAIN') {
+            if (dwellProgress > 0 || gaugeStatus === 'UNCERTAIN') {
                 box.className = 'smart-box active';
                 labelDiv.innerHTML = `🎯 ${labelText}`;
             } else {
@@ -909,3 +906,19 @@ async function saveAdminSettings() {
         console.error('Failed to save settings:', e);
     }
 }
+
+async function resetAdminSettings() {
+    if (!confirm('Are you sure you want to reset all settings to defaults?')) return;
+    try {
+        const response = await fetch('/settings/reset', { method: 'POST' });
+        if (response.ok) {
+            alert('Settings reset to defaults successfully!');
+            fetchAdminSettings(); // Refresh UI
+        } else {
+            alert('Failed to reset settings');
+        }
+    } catch (e) {
+        console.error('Failed to reset settings:', e);
+    }
+}
+

@@ -135,18 +135,17 @@
             position: absolute;
             box-sizing: border-box;
             border-radius: 4px;
-            transition: all 0.2s ease-out;
             pointer-events: none;
         }
         
         .smart-box.idle-gauge {
-            border: 1px dashed rgba(255, 255, 255, 0.4);
+            border: 1px dashed rgba(255, 255, 255, 0.2);
             background: rgba(255, 255, 255, 0.02);
         }
         
         .smart-box.idle-part {
-            border: 2px solid rgba(255, 204, 0, 0.5);
-            background: rgba(255, 204, 0, 0.05);
+            border: 2px solid rgba(255, 204, 0, 0.2);
+            background: rgba(255, 204, 0, 0.02);
         }
 
         .smart-box.active {
@@ -154,20 +153,6 @@
             background: rgba(14, 165, 233, 0.15);
             box-shadow: 0 0 15px rgba(14, 165, 233, 0.4);
             z-index: 10;
-        }
-
-        .smart-box.success {
-            border: 2px solid #22c55e;
-            background: rgba(34, 197, 94, 0.2);
-            box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
-            animation: successPulse 0.5s ease-out;
-            z-index: 10;
-        }
-
-        @keyframes successPulse {
-            0% { transform: scale(1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
-            50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(34, 197, 94, 0.8); }
-            100% { transform: scale(1); box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
         }
 
         .smart-label {
@@ -194,16 +179,24 @@
             transition: opacity 0.2s;
         }
         
-        .smart-box.active .smart-label, .smart-box.success .smart-label, .smart-box.idle-part .smart-label {
+        .smart-box.active .smart-label {
             opacity: 1;
         }
         
         .smart-box.idle-part .smart-label {
-            background: rgba(80, 60, 0, 0.85);
-            border-color: rgba(255, 204, 0, 0.3);
+            opacity: 0.6;
+            background: rgba(80, 60, 0, 0.6);
+            border-color: rgba(255, 204, 0, 0.2);
+        }
+
+        .smart-box.idle-gauge .smart-label {
+            opacity: 0.5;
+            background: rgba(15, 23, 42, 0.4);
+            border-color: rgba(255, 255, 255, 0.1);
         }
         
-        .focus-mode-on .smart-box.idle-gauge {
+        .focus-mode-on .smart-box.idle-gauge,
+        .focus-mode-on .smart-box.idle-part {
             display: none !important;
         }
     </style>
@@ -255,6 +248,7 @@
 
                 <div class="admin-buttons">
                     <button class="btn-admin btn-cancel" onclick="closeAdminModal()">Close</button>
+                    <button class="btn-admin btn-cancel" style="background: #ef4444; color: white;" onclick="resetAdminSettings()">Reset</button>
                     <button class="btn-admin btn-save" onclick="saveAdminSettings()">Save Changes</button>
                 </div>
             </div>
