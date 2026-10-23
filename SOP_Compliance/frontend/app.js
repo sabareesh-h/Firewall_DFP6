@@ -20,26 +20,49 @@ const MAX_RECONNECT_ATTEMPTS = 50;
 const RECONNECT_DELAY_MS = 2000;
 let currentSource = 'video';
 
-// ─── Gauge Definitions (must match config.py GAUGE_CHECKPOINTS) ─────────
-const GAUGE_NAMES = {
-    1: 'Distance Gauge',
-    2: 'Pin Gauge',
-    3: 'Dia Gauge',
-    4: 'M6 Thread',
-    5: 'M8 Thread',
-    6: '11mm Gauge',
-    7: '13mm Gauge',
+// ─── Privacy Blur Zone State ────────────────────────────────────────────────
+// Normalised [x1, y1, x2, y2] (0.0–1.0). Kept in sync with the backend.
+let blurEnabled = true;
+let blurZone = [0, 0, 0.36, 1];
+
+// ─── Profile State ─────────────────────────────────────────────────────────
+// Populated dynamically from the backend via WebSocket (profile_meta field).
+let currentProfile = 'TML';   // default
+let currentGaugeNames = {};   // { id: 'Gauge Name' }
+let currentGaugeImages = {};  // { id: 'filename.png' }
+
+// ─── Supervisor Bypass State ────────────────────────────────────────────────
+// Mirror of the backend flag; the backend is the source of truth.
+let bypassActive = false;
+
+// These are the static defaults used until the first WS message arrives.
+const PROFILE_DEFAULTS = {
+    TML: {
+        names: {
+            1: 'Distance Gauge', 2: 'Pin Gauge', 3: 'Dia Gauge',
+            4: 'M6 Thread', 5: 'M8 Thread', 6: '11mm Gauge', 7: '13mm Gauge',
+        },
+        images: {
+            1: 'Distance.png', 2: 'Pin Gauge.png', 3: 'Dia Gauge.png',
+            4: 'M6 Gauge.png', 5: 'M8 Gauge.png', 6: '11mm Gauge.png', 7: '13mm Gauge.png',
+        },
+    },
+    HMI: {
+        names: {
+            1: '11mm Gauge', 2: '8mm Gauge', 3: 'Outer Seal',
+            4: 'Inlet Go', 5: 'Inlet NoGo', 6: 'LP Go', 7: 'LP NoGo',
+        },
+        images: {
+            1: 'HMI_11mm.png', 2: 'HMI_8mm.png', 3: 'HMI_OuterSeal.png',
+            4: 'HMI_UGauge.png', 5: 'HMI_UGauge.png',
+            6: 'HMI_UGauge.png', 7: 'HMI_UGauge.png',
+        },
+    },
 };
 
-const GAUGE_IMAGES = {
-    1: 'Distance.png',
-    2: 'Pin Gauge.png',
-    3: 'Dia Gauge.png',
-    4: 'M6 Gauge.png',
-    5: 'M8 Gauge.png',
-    6: '11mm Gauge.png',
-    7: '13mm Gauge.png',
-};
+// Initialize with TML defaults
+currentGaugeNames  = PROFILE_DEFAULTS.TML.names;
+currentGaugeImages = PROFILE_DEFAULTS.TML.images;
 
 // ─── Initialize ─────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -235,6 +258,38 @@ async function pollStatus() {
 
 // ─── Status Update Handler ──────────────────────────────────────────────────
 function handleStatusUpdate(data) {
+
+    // ── Profile switch detection ──────────────────────────────────────────
+    if (data.profile_meta && data.profile_meta.name !== currentProfile) {
+        currentProfile = data.profile_meta.name;
+        // Rebuild gauge names/images from backend metadata
+        if (data.profile_meta.gauge_images) {
+            // gauge_images from backend is { id: 'filename' } with string keys
+            const imgs = data.profile_meta.gauge_images;
+            currentGaugeImages = {};
+            for (const [k, v] of Object.entries(imgs)) {
+                currentGaugeImages[parseInt(k)] = v;
+            }
+        }
+        // Rebuild gauge names from the gauges payload (first frame after switch)
+        if (data.gauges) {
+            currentGaugeNames = {};
+            for (const g of Object.values(data.gauges)) {
+                currentGaugeNames[g.id] = g.name;
+            }
+        }
+        initGaugeList();
+        updateProfileToggle(currentProfile);
+        updateAppInfoPanel(currentProfile, data.profile_meta.display_name);
+        console.log('Profile switched to:', currentProfile);
+    } else if (data.gauges && Object.keys(currentGaugeNames).length === 0) {
+        // First message — populate names
+        for (const g of Object.values(data.gauges)) {
+            currentGaugeNames[g.id] = g.name;
+        }
+        initGaugeList();
+    }
+
     updateGauges(data.gauges || {});
     updateOverallResult(data.overall_status, data.inspection_state, data.completed, data.total);
     updateInspectionState(data.inspection_state);
@@ -243,14 +298,16 @@ function handleStatusUpdate(data) {
     updateLogs(data.recent_logs || []);
     updateHeaderStatuses(data.detector_available, data.camera_connected);
     updateSafetyWarning(data.glove_warning);
+    updateAutoSwitchStatus(data);
+
+    if (data.bypass_active !== undefined) {
+        bypassActive = !!data.bypass_active;
+        updateBypassUi();
+    }
 
     const partNoEl = document.getElementById('scanned-part-no');
     if (partNoEl) {
-        if (data.scanned_part_no) {
-            partNoEl.textContent = data.scanned_part_no;
-        } else {
-            partNoEl.textContent = '--';
-        }
+        partNoEl.textContent = data.scanned_part_no || '--';
     }
 
     if (data.source) {
@@ -258,8 +315,19 @@ function handleStatusUpdate(data) {
         updateSourceButtons(data.source);
         updateCameraModeLabel(data.source);
     }
-    
-    // Render the Smart Overlays
+
+    // Keep the Blur Zone toggle in sync with the server state.
+    if (data.blur_enabled !== undefined) {
+        blurEnabled = !!data.blur_enabled;
+        const blurToggle = document.getElementById('blur-toggle');
+        if (blurToggle && blurToggle.checked !== blurEnabled) {
+            blurToggle.checked = blurEnabled;
+        }
+    }
+    if (Array.isArray(data.blur_zone) && data.blur_zone.length === 4) {
+        blurZone = data.blur_zone;
+    }
+
     if (data.raw_detections) {
         updateSmartOverlays(data);
     }
@@ -284,8 +352,11 @@ function updateSmartOverlays(data) {
     const classCounts = {};
 
     data.raw_detections.forEach((det) => {
-        // Stable ID generation to prevent CSS transition flickering when array index changes
-        const safeClassName = det.class_name.replace(/\s+/g, '-');
+        // Stable ID generation to prevent CSS transition flickering when array index changes.
+        // U-Gauges carry a resolved display_name (Inlet Go / Inlet NoGo / LP Go /
+        // LP NoGo) which keeps the four identical "U Gauge" boxes distinguishable.
+        const detName = det.display_name || det.class_name;
+        const safeClassName = detName.replace(/\s+/g, '-');
         classCounts[safeClassName] = (classCounts[safeClassName] || 0) + 1;
         const id = `det-${safeClassName}-${classCounts[safeClassName]}`;
         
@@ -318,7 +389,7 @@ function updateSmartOverlays(data) {
 
         // Content
         const labelDiv = box.querySelector('.smart-label');
-        let labelText = det.class_name;
+        let labelText = detName;
         if (data.show_confidence_score) {
             labelText += ` <span>${det.confidence.toFixed(2)}</span>`;
         }
@@ -329,10 +400,12 @@ function updateSmartOverlays(data) {
         let gaugeStatus = null;
         let dwellProgress = 0;
 
-        // Match YOLO class name (e.g., "Pin") with gauge name (e.g., "Pin Gauge")
+        // Match YOLO class name (e.g., "Pin") with gauge name (e.g., "Pin Gauge").
+        // U-Gauges match on their resolved display name instead.
         if (data.gauges) {
             for (const key in data.gauges) {
-                if (data.gauges[key].name.startsWith(det.class_name)) {
+                const gaugeName = data.gauges[key].name;
+                if (gaugeName === detName || gaugeName.startsWith(det.class_name)) {
                     isGauge = true;
                     gaugeStatus = data.gauges[key].status;
                     dwellProgress = data.gauges[key].dwell_progress;
@@ -381,6 +454,163 @@ function toggleFocusMode() {
     }
 }
 
+// ─── Privacy Blur Zone Toggle ───────────────────────────────────────────────
+async function toggleBlur() {
+    const toggle = document.getElementById('blur-toggle');
+    if (!toggle) return;
+    blurEnabled = toggle.checked;
+    try {
+        const res = await fetch('/settings/blur', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: toggle.checked }),
+        });
+        if (!res.ok) {
+            console.error('Failed to toggle blur zone:', await res.text());
+        }
+    } catch (e) {
+        console.error('Failed to toggle blur zone:', e);
+    }
+}
+
+
+// ─── Profile Toggle ─────────────────────────────────────────────────────────
+async function switchProfile(profile) {
+    try {
+        const res = await fetch('/switch_profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile }),
+        });
+        if (!res.ok) {
+            console.error('Profile switch failed:', await res.text());
+            return;
+        }
+        const data = await res.json();
+        currentProfile = data.active_profile;
+        // Reload gauge names/images from the profile defaults for immediate UI feedback
+        if (PROFILE_DEFAULTS[currentProfile]) {
+            currentGaugeNames  = { ...PROFILE_DEFAULTS[currentProfile].names };
+            currentGaugeImages = { ...PROFILE_DEFAULTS[currentProfile].images };
+        }
+        initGaugeList();
+        updateProfileToggle(currentProfile);
+        updateAppInfoPanel(currentProfile, data.display_name || currentProfile);
+        console.log('Switched to profile:', currentProfile);
+    } catch (e) {
+        console.error('Failed to switch profile:', e);
+    }
+}
+
+function updateProfileToggle(profile) {
+    const tmlBtn = document.getElementById('profile-btn-tml');
+    const hmiBtn = document.getElementById('profile-btn-hmi');
+    if (!tmlBtn || !hmiBtn) return;
+
+    if (profile === 'TML') {
+        tmlBtn.classList.add('profile-btn-active');
+        hmiBtn.classList.remove('profile-btn-active');
+    } else {
+        hmiBtn.classList.add('profile-btn-active');
+        tmlBtn.classList.remove('profile-btn-active');
+    }
+}
+
+// ─── Auto Model Switch Indicator ────────────────────────────────────────────
+function updateAutoSwitchStatus(data) {
+    const el = document.getElementById('auto-switch-status');
+    const textEl = document.getElementById('auto-switch-text');
+    if (!el || !textEl) return;
+
+    el.classList.remove('auto-on', 'auto-pending');
+
+    if (data.scan_auto_switch === false) {
+        textEl.textContent = 'Auto switch off — manual only';
+        return;
+    }
+
+    if (data.pending_profile) {
+        el.classList.add('auto-pending');
+        const name = data.pending_profile_display_name || data.pending_profile;
+        textEl.textContent = `Switching to ${name}\u2026`;
+        return;
+    }
+
+    el.classList.add('auto-on');
+    textEl.textContent = `Auto: ${data.active_profile || currentProfile}`;
+}
+
+function updateAppInfoPanel(profileKey, displayName) {
+    const modelEl = document.getElementById('app-info-model-type');
+    if (modelEl) modelEl.textContent = profileKey;
+    const selectEl = document.getElementById('app-select');
+    if (selectEl) selectEl.value = displayName || profileKey;
+}
+
+// ─── Supervisor Bypass ──────────────────────────────────────────────────────
+function updateBypassUi() {
+    const banner = document.getElementById('bypass-banner');
+    if (banner) banner.classList.toggle('active', bypassActive);
+
+    const label = document.getElementById('bypass-state-label');
+    if (label) {
+        label.textContent = bypassActive
+            ? 'Bypass: ON — every gauge reports CHECKED (OK)'
+            : 'Bypass: OFF — normal inspection';
+        label.style.color = bypassActive ? '#dc2626' : '#16a34a';
+    }
+
+    const pinInput = document.getElementById('bypass-pin');
+    if (pinInput) pinInput.disabled = bypassActive;
+}
+
+async function setBypass(enabled) {
+    const pinEl = document.getElementById('bypass-pin');
+    const password = enabled ? (pinEl ? pinEl.value.trim() : '') : '';
+
+    if (enabled && !password) {
+        alert('Enter the supervisor PIN to enable the bypass.');
+        if (pinEl) pinEl.focus();
+        return;
+    }
+
+    try {
+        const res = await fetch('/bypass', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled, password }),
+        });
+
+        if (res.status === 401) {
+            alert('Incorrect PIN — bypass not enabled.');
+            if (pinEl) { pinEl.value = ''; pinEl.focus(); }
+            return;
+        }
+        if (!res.ok) {
+            alert('Bypass request failed.');
+            return;
+        }
+
+        const data = await res.json();
+        bypassActive = !!data.bypass_active;
+        if (pinEl && bypassActive) pinEl.value = '';   // never keep the PIN
+        updateBypassUi();
+        console.log('Supervisor bypass:', bypassActive ? 'ON' : 'OFF');
+    } catch (e) {
+        console.error('Bypass request failed:', e);
+    }
+}
+
+function enableBypass() {
+    if (!confirm('Enable bypass?\n\nEvery gauge will report CHECKED (OK) without inspection.\nUse only when the software has failed.')) {
+        return;
+    }
+    setBypass(true);
+}
+
+function disableBypass() {
+    setBypass(false);
+}
 
 // ─── Gauge List ─────────────────────────────────────────────────────────────
 function initGaugeList() {
@@ -389,14 +619,21 @@ function initGaugeList() {
 
     container.innerHTML = '';
 
-    for (const [id, name] of Object.entries(GAUGE_NAMES)) {
+    const total = Object.keys(currentGaugeNames).length;
+    // Update the header counter placeholder
+    const counterEl = document.getElementById('gauge-counter');
+    if (counterEl) counterEl.textContent = `0 / ${total} Completed`;
+
+    for (const [id, name] of Object.entries(currentGaugeNames)) {
         const item = document.createElement('div');
         item.className = 'gauge-item';
         item.id = `gauge-item-${id}`;
         item.setAttribute('data-status', 'NOT_CHECKED');
 
-        const imageName = GAUGE_IMAGES[id];
-        const imageHtml = `<img src="/reference_images/${imageName}" alt="${name}" style="max-height: 24px; max-width: 36px; object-fit: contain;" />`;
+        const imageName = currentGaugeImages[id];
+        const imageHtml = imageName
+            ? `<img src="/reference_images/${imageName}" alt="${name}" onerror="this.style.display='none'" style="max-height: 24px; max-width: 36px; object-fit: contain;" />`
+            : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`;
 
         item.innerHTML = `
             <span class="gauge-num" style="width: 24px; height: 24px; font-size: 12px; flex-shrink: 0;">${id}</span>
@@ -412,7 +649,7 @@ function initGaugeList() {
 
 function updateGauges(gauges) {
     let completed = 0;
-    const total = Object.keys(GAUGE_NAMES).length;
+    const total = Object.keys(currentGaugeNames).length;
 
     for (const [key, gauge] of Object.entries(gauges)) {
         const id = gauge.id;
@@ -420,7 +657,7 @@ function updateGauges(gauges) {
         if (!item) continue;
 
         const status = gauge.status;
-        const dwell = gauge.dwell_progress || 0;  // 0.0 to 1.0
+        const dwell = gauge.dwell_progress || 0;
 
         let displayStatus = 'NOT_CHECKED';
         if (status === 'OK') {
@@ -521,7 +758,7 @@ function updateOverallResult(status, inspectionState, completed, total) {
     }
 
     if (detailEl) {
-        detailEl.textContent = `${completed || 0} / ${total || 7} gauges completed`;
+        detailEl.textContent = `${completed || 0} / ${total || Object.keys(currentGaugeNames).length} gauges completed`;
     }
 }
 
@@ -595,22 +832,22 @@ function updateSafetyWarning(isWarningActive) {
 }
 
 // ─── Recent Logs ────────────────────────────────────────────────────────────
+// The panel is locked to exactly 5 rows so the layout never jumps.  New logs
+// fill from the top; unused rows stay as quiet placeholders.
+const LOG_ROW_COUNT = 5;
+
 function updateLogs(logs) {
     const tbody = document.getElementById('logs-tbody');
     if (!tbody) return;
 
-    if (!logs || logs.length === 0) {
-        tbody.innerHTML = '<tr class="log-empty"><td colspan="4">No inspection logs yet</td></tr>';
-        return;
-    }
+    // Show most recent first, never more than the fixed row count
+    const reversed = [...(logs || [])].reverse().slice(0, LOG_ROW_COUNT);
 
-    // Show most recent first
-    const reversed = [...logs].reverse();
-
-    tbody.innerHTML = reversed.map((log, index) => {
+    const rows = reversed.map((log) => {
         const isOk = log.result === 'OK';
         const resultClass = isOk ? 'ok' : 'ng';
         const resultIcon = isOk ? '✓' : '✗';
+        const bypassTag = log.bypass ? '<span class="log-bypass-tag">BYPASS</span>' : '';
 
         return `
             <tr>
@@ -620,12 +857,26 @@ function updateLogs(logs) {
                     <span class="log-result ${resultClass}">
                         <span class="log-result-icon">${resultIcon}</span>
                         ${log.result}
-                    </span>
+                    </span>${bypassTag}
                 </td>
                 <td>${log.cycle_time || '--'}</td>
             </tr>
         `;
-    }).join('');
+    });
+
+    // Fill the remaining slots so the table height is constant from the start
+    for (let i = reversed.length; i < LOG_ROW_COUNT; i++) {
+        rows.push(`
+            <tr class="log-blank">
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+            </tr>
+        `);
+    }
+
+    tbody.innerHTML = rows.join('');
 }
 
 // ─── Source Switching ───────────────────────────────────────────────────────
@@ -778,6 +1029,7 @@ function openAdminModal() {
     document.getElementById('admin-title').textContent = 'Admin Login';
     document.getElementById('admin-pin').value = '';
     document.getElementById('admin-pin').focus();
+    updateBypassUi();
 }
 
 function closeAdminModal() {
@@ -811,6 +1063,15 @@ async function fetchAdminSettings() {
             } else {
                 document.getElementById('set-deadzone').value = '';
             }
+
+            // Privacy blur zone (stored normalised, shown as percentages)
+            document.getElementById('set-blur-enabled').checked = !!data.blur_enabled;
+            const zone = Array.isArray(data.blur_zone) && data.blur_zone.length === 4
+                ? data.blur_zone
+                : [0, 0, 1, 1];
+            ['x1', 'y1', 'x2', 'y2'].forEach((key, i) => {
+                document.getElementById(`set-blur-${key}`).value = (zone[i] * 100).toFixed(1);
+            });
             
             // Populate individual gauges
             const container = document.getElementById('gauge-settings-container');
@@ -871,6 +1132,20 @@ async function saveAdminSettings() {
         }
     }
     
+    // Privacy blur zone
+    const blurEnabledVal = document.getElementById('set-blur-enabled').checked;
+    const blurZoneVal = ['x1', 'y1', 'x2', 'y2'].map(key =>
+        parseFloat(document.getElementById(`set-blur-${key}`).value) / 100
+    );
+    if (blurZoneVal.some(v => isNaN(v) || v < 0 || v > 1)) {
+        alert('Blur zone values must be percentages between 0 and 100');
+        return;
+    }
+    if (blurZoneVal[2] - blurZoneVal[0] < 0.01 || blurZoneVal[3] - blurZoneVal[1] < 0.01) {
+        alert('Blur zone is too small — X2 must be greater than X1 and Y2 greater than Y1');
+        return;
+    }
+
     // Collect gauge configs
     const gauge_configs = [];
     document.querySelectorAll('.admin-gauge-card').forEach(card => {
@@ -892,11 +1167,15 @@ async function saveAdminSettings() {
                 near_distance_threshold: near,
                 ok_hold_seconds: dwell,
                 gauge_configs: gauge_configs,
-                visual_deadzone: deadzone
+                visual_deadzone: deadzone,
+                blur_enabled: blurEnabledVal,
+                blur_zone: blurZoneVal
             })
         });
 
         if (response.ok) {
+            blurEnabled = blurEnabledVal;
+            blurZone = blurZoneVal;
             alert('Settings updated successfully!');
             closeAdminModal();
         } else {

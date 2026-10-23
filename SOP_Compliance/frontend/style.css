@@ -972,6 +972,16 @@ body {
     padding: 14px;
 }
 
+/* Fixed-height log rows — placeholders keep the table from growing */
+.logs-table tbody tr {
+    height: 31px;
+}
+
+.log-blank td {
+    color: var(--text-muted);
+    opacity: 0.45;
+}
+
 .log-result {
     display: flex;
     align-items: center;
@@ -1059,4 +1069,48 @@ body {
         flex: 1;
         min-width: 200px;
     }
+}
+
+/* ─── Supervisor Bypass Warning Strip ────────────────────────── */
+.bypass-banner {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 7px 14px;
+    flex-shrink: 0;
+    background: repeating-linear-gradient(135deg, #dc2626, #dc2626 18px, #b91c1c 18px, #b91c1c 36px);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    text-align: center;
+    animation: bypass-flash 1.6s ease-in-out infinite;
+}
+
+.bypass-banner.active {
+    display: flex;
+}
+
+.bypass-banner-icon {
+    font-size: 14px;
+}
+
+@keyframes bypass-flash {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.72; }
+}
+
+.log-bypass-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #dc2626;
+    color: #ffffff;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
 }

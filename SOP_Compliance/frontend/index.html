@@ -8,7 +8,7 @@
     <title>SOP Compliance Software — Fire Wall DFP6</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=5">
+    <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 
 <body>
@@ -199,6 +199,80 @@
         .focus-mode-on .smart-box.idle-part {
             display: none !important;
         }
+        /* Profile Toggle Buttons */
+        .profile-toggle {
+            display: flex;
+            gap: 6px;
+            width: 100%;
+        }
+
+        .profile-btn {
+            flex: 1;
+            padding: 7px 0;
+            border: 2px solid rgba(14, 165, 233, 0.3);
+            border-radius: 8px;
+            background: transparent;
+            color: #94a3b8;
+            font-size: 13px;
+            font-weight: 700;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            letter-spacing: 0.5px;
+        }
+
+        .profile-btn:hover {
+            border-color: rgba(14, 165, 233, 0.6);
+            color: #e2e8f0;
+            background: rgba(14, 165, 233, 0.08);
+        }
+
+        .profile-btn-active {
+            background: linear-gradient(135deg, #0ea5e9, #0284c7);
+            border-color: #0ea5e9;
+            color: white;
+            box-shadow: 0 3px 12px rgba(14, 165, 233, 0.35);
+        }
+
+        .profile-btn-active:hover {
+            background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+            color: white;
+        }
+
+        /* Auto model-switch indicator (scan → profile) */
+        .auto-switch-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: #64748b;
+        }
+
+        .auto-switch-status .auto-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            display: inline-block;
+        }
+
+        .auto-switch-status.auto-on {
+            color: #38bdf8;
+        }
+
+        .auto-switch-status.auto-pending {
+            color: #f59e0b;
+            animation: auto-pending-pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes auto-pending-pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.45; }
+        }
+
     </style>
 
     <!-- Admin Panel Modal -->
@@ -218,6 +292,25 @@
             </div>
 
             <div id="admin-settings-view" style="display: none; max-height: 70vh; overflow-y: auto; padding-right: 10px;">
+                <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #dc2626; border-bottom: 1px solid #fecaca; padding-bottom: 5px;">Supervisor Bypass</h3>
+                <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                    <div style="font-size: 11px; color: #991b1b; margin-bottom: 10px; line-height: 1.5;">
+                        Forces every gauge to show <strong>CHECKED (OK)</strong> without inspection, so production can continue when the software fails.
+                        The PIN is required every time, and the bypass is always OFF after a restart.
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: flex-end;">
+                        <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                            <label>Supervisor PIN</label>
+                            <input type="password" id="bypass-pin" placeholder="Enter PIN to enable">
+                        </div>
+                        <button class="btn-admin btn-save" style="background: #dc2626; white-space: nowrap;" onclick="enableBypass()">Enable Bypass</button>
+                        <button class="btn-admin btn-cancel" style="white-space: nowrap;" onclick="disableBypass()">Disable</button>
+                    </div>
+                    <div id="bypass-state-label" style="margin-top: 10px; font-size: 12px; font-weight: 700; color: #16a34a;">
+                        Bypass: OFF — normal inspection
+                    </div>
+                </div>
+
                 <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px;">Global Settings</h3>
                 <div class="admin-field">
                     <label>Confidence Threshold (0.0 to 1.0)</label>
@@ -240,6 +333,31 @@
                     <input type="text" id="set-deadzone" placeholder="e.g. 100, 100, 400, 400">
                     <div style="font-size: 10px; color: #94a3b8; margin-top: 4px;">Detections inside this box are ignored. Leave blank to disable.</div>
                 </div>
+
+                <h3 style="margin: 20px 0 10px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px;">Privacy Blur Zone</h3>
+                <div class="admin-field" style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="set-blur-enabled" style="width: auto;">
+                    <label for="set-blur-enabled" style="margin: 0; cursor: pointer;">Blur this area and ignore all detections inside it</label>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                        <label>X1 (%)</label>
+                        <input type="number" id="set-blur-x1" step="0.1" min="0" max="100">
+                    </div>
+                    <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                        <label>Y1 (%)</label>
+                        <input type="number" id="set-blur-y1" step="0.1" min="0" max="100">
+                    </div>
+                    <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                        <label>X2 (%)</label>
+                        <input type="number" id="set-blur-x2" step="0.1" min="0" max="100">
+                    </div>
+                    <div class="admin-field" style="flex: 1; margin-bottom: 0;">
+                        <label>Y2 (%)</label>
+                        <input type="number" id="set-blur-y2" step="0.1" min="0" max="100">
+                    </div>
+                </div>
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 6px;">Percent of frame width / height (0–100). The area is blurred in the video feed and any detection whose centre falls inside is dropped.</div>
 
                 <h3 style="margin: 20px 0 10px 0; font-size: 14px; color: #64748b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px;">Individual Gauge Settings</h3>
                 <div id="gauge-settings-container">
@@ -331,6 +449,12 @@
         </div>
     </header>
 
+    <!-- Supervisor bypass warning strip (hidden unless bypass is active) -->
+    <div id="bypass-banner" class="bypass-banner">
+        <span class="bypass-banner-icon">⚠</span>
+        <span><strong>BYPASS ACTIVE</strong> — every gauge is reported CHECKED without inspection. Supervisor only.</span>
+    </div>
+
     <!-- ═══════════ MAIN CONTENT ═══════════ -->
     <main id="main-content">
 
@@ -404,7 +528,7 @@
                     <div class="connection-row">
                         <div class="conn-left">
                             <span class="conn-num">1</span>
-                            <span class="conn-label">YOLO Model</span>
+                            <span class="conn-label">Model</span>
                         </div>
                         <span class="conn-status" id="conn-detector">
                             <span class="status-dot offline"></span>
@@ -414,7 +538,7 @@
                     <div class="connection-row">
                         <div class="conn-left">
                             <span class="conn-num">1</span>
-                            <span class="conn-label">Camera / Video</span>
+                            <span class="conn-label">Camera</span>
                         </div>
                         <span class="conn-status" id="conn-camera">
                             <span class="status-dot offline"></span>
@@ -436,14 +560,21 @@
                     <span class="card-title">Current Application</span>
                 </div>
                 <div class="card-body app-info-body">
-                    <div class="app-select-row">
-                        <select class="app-select" id="app-select">
-                            <option>FIRE WALL DFP6</option>
-                        </select>
+                    <!-- Part Type Selector (Profile Toggle) -->
+                    <div style="margin-bottom: 12px;">
+                        <div style="font-size: 11px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Part Type</div>
+                        <div class="profile-toggle">
+                            <button id="profile-btn-tml" class="profile-btn profile-btn-active" onclick="switchProfile('TML')">TML</button>
+                            <button id="profile-btn-hmi" class="profile-btn" onclick="switchProfile('HMI')">HMI</button>
+                        </div>
+                        <div id="auto-switch-status" class="auto-switch-status">
+                            <span class="auto-dot"></span>
+                            <span id="auto-switch-text">Auto: waiting for scan</span>
+                        </div>
                     </div>
                     <div class="app-detail-row">
                         <span class="app-detail-label">Model</span>
-                        <span class="app-detail-value">TML</span>
+                        <span class="app-detail-value" id="app-info-model-type">TML</span>
                     </div>
                     <div class="app-detail-row">
                         <span class="app-detail-label">Department</span>
@@ -485,6 +616,15 @@
                         </label>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
+                        <label for="blur-toggle" style="font-size: 0.8rem; color: #0ea5e9; font-weight: 700;">Blur Zone</label>
+                        <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                            <input type="checkbox" id="blur-toggle" onchange="toggleBlur()" checked
+                                style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round"
+                                style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="pacing-toggle" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Dynamic Pacing</label>
                         <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
                             <input type="checkbox" id="pacing-toggle" onchange="togglePacing()" checked
@@ -501,10 +641,10 @@
                             <span class="slider round"
                                 style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
                             <style>
-                                #conf-toggle:checked+.slider, #pacing-toggle:checked+.slider, #focus-mode-toggle:checked+.slider {
+                                #conf-toggle:checked+.slider, #pacing-toggle:checked+.slider, #blur-toggle:checked+.slider {
                                     background-color: #0d9488;
                                 }
-                                #focus-mode-toggle:checked+.slider {
+                                #focus-mode-toggle:checked+.slider, #blur-toggle:checked+.slider {
                                     background-color: #0ea5e9;
                                 }
 
@@ -521,7 +661,7 @@
                                     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
                                 }
 
-                                #conf-toggle:checked+.slider:before, #pacing-toggle:checked+.slider:before, #focus-mode-toggle:checked+.slider:before {
+                                #conf-toggle:checked+.slider:before, #pacing-toggle:checked+.slider:before, #focus-mode-toggle:checked+.slider:before, #blur-toggle:checked+.slider:before {
                                     transform: translateX(14px);
                                 }
                             </style>
@@ -633,7 +773,7 @@
         <span class="footer-version">Version 1.0.0</span>
     </footer>
 
-    <script src="/static/app.js?v=8"></script>
+    <script src="/static/app.js?v=9"></script>
 </body>
 
 </html>

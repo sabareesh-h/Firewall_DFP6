@@ -1,0 +1,59 @@
+{
+    "confidence_threshold": 0.1,
+    "overlap_threshold": 0.15,
+    "near_distance_threshold": 150,
+    "ok_hold_seconds": 0.1,
+    "gauge_configs": [
+        {
+            "id": 1,
+            "method": "near",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 50
+        },
+        {
+            "id": 2,
+            "method": "near",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 50
+        },
+        {
+            "id": 3,
+            "method": "fully_inside",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 150
+        },
+        {
+            "id": 4,
+            "method": "near",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 60
+        },
+        {
+            "id": 5,
+            "method": "near",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 60
+        },
+        {
+            "id": 6,
+            "method": "near",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 60
+        },
+        {
+            "id": 7,
+            "method": "near",
+            "overlap_threshold": 0.15,
+            "near_distance_threshold": 60
+        }
+    ],
+    "visual_deadzone": null,
+    "active_profile": "TML",
+    "blur_enabled": true,
+    "blur_zone": [
+        0.0,
+        0.0,
+        0.36,
+        1.0
+    ]
+}

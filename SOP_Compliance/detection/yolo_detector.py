@@ -38,6 +38,7 @@ class YOLODetector:
         imgsz: int = 1280,
         device: str = "0",
         engine_path: Optional[str] = None,
+        class_names_override: Optional[Dict[int, str]] = None,
     ):
         self.model_path   = model_path
         self.engine_path  = engine_path
@@ -50,6 +51,9 @@ class YOLODetector:
         self._available  = False
         self._warmed_up  = False
         self._using_trt  = False
+        # If provided, these names take precedence over both the model's
+        # embedded names and config.CLASS_NAMES (used for per-profile isolation).
+        self._class_names_override = class_names_override
 
         # Inference timing (logged every N frames)
         self._infer_count   = 0
@@ -91,26 +95,21 @@ class YOLODetector:
             self._available  = True
             backend = "TensorRT" if self._using_trt else "PyTorch"
 
-            # ── Override class names with config.CLASS_NAMES ─────────
-            # The model's embedded names may differ from what config.py
-            # defines (e.g., trained with slightly different labels).
-            # config.CLASS_NAMES is the single source of truth.
-            import config as _cfg
-            if hasattr(_cfg, "CLASS_NAMES") and _cfg.CLASS_NAMES:
-                model_names = dict(self.class_names)  # copy original
-                self.class_names = dict(_cfg.CLASS_NAMES)
-
-                # Log any discrepancies so they're easy to debug
-                for cid, cfg_name in _cfg.CLASS_NAMES.items():
+            # ── Override class names ──────────────────────────────────
+            # Priority: explicit class_names_override (per-profile) >
+            #           model's embedded names.
+            if self._class_names_override:
+                model_names = dict(self.class_names)
+                self.class_names = dict(self._class_names_override)
+                for cid, name in self._class_names_override.items():
                     model_name = model_names.get(cid)
-                    if model_name and model_name != cfg_name:
+                    if model_name and model_name != name:
                         logger.warning(
                             f"  Class {cid}: model='{model_name}' → "
-                            f"config='{cfg_name}' (overridden)"
+                            f"override='{name}'"
                         )
-
                 logger.info(
-                    f"Class names overridden from config.CLASS_NAMES "
+                    f"Class names overridden from profile config "
                     f"({len(self.class_names)} classes)"
                 )
 

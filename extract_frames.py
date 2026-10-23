@@ -45,7 +45,7 @@ def extract_frames(video_path, output_dir, mode="all", step=1, fps_target=None, 
     print("=" * 60)
 
     os.makedirs(output_dir, exist_ok=True)
-    digits = len(str(total_video_frames))
+    digits = max(5, len(str(total_video_frames)))
 
     frame_idx = 0
     saved_count = 0
@@ -54,6 +54,14 @@ def extract_frames(video_path, output_dir, mode="all", step=1, fps_target=None, 
 
     with tqdm(total=total_video_frames, desc="Processing Video", unit="frame") as pbar:
         while True:
+            if mode == "step" and (frame_idx % step != 0):
+                ret = cap.grab()
+                if not ret:
+                    break
+                frame_idx += 1
+                pbar.update(1)
+                continue
+
             ret, frame = cap.read()
             if not ret:
                 break
