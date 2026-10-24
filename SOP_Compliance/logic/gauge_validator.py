@@ -118,8 +118,10 @@ class UGaugeIdentityTracker:
     * A box the model reports as 8mm / 11mm is handed back to a U-gauge track
       that has no box this frame (label flicker), or re-labelled by the
       highest-confidence rule.
-    * A track that is briefly occluded stays alive for TRACK_MAX_MISSES
-      frames, so its name survives a hand or an arm passing over it.
+    * A named track that is briefly occluded stays alive for
+      `occlusion_hold_seconds` (3 s), so its name survives a hand or an arm
+      passing over the rack.  This applies to every named gauge, not only the
+      one that is currently being used.
     * A track is named once, while it rests on a learned rack slot (or, if
       only one rank is left, by elimination).  The name is sticky: it is
       never taken away because the gauge was put down.
@@ -139,7 +141,7 @@ class UGaugeIdentityTracker:
     RELINK_PX = 420.0           # recovery radius for an unambiguous jump
     RELINK_MAX_MISSES = 12      # only re-link a recently seen track
     TRACK_HISTORY = 6
-    DEDUPE_PX = 30.0            # two boxes closer than this = one gauge
+    DEDUPE_PX = 15.0            # two boxes closer than this = one gauge
     REFERENCE_WIDTH = 1280.0    # pixel thresholds are tuned for this width
     OCCLUSION_HOLD_SECONDS = 3.0  # remember a hidden gauge for a few seconds
     SLOT_REFRESH_PX = 250.0     # all four at rest -> follow a shifted rack
@@ -153,6 +155,7 @@ class UGaugeIdentityTracker:
         stable_px: Optional[float] = None,
         learning_max_spread: Optional[float] = None,
         occlusion_hold_seconds: Optional[float] = None,
+        dedupe_px: Optional[float] = None,
     ):
         assert len(checkpoint_ids) == 4, "UGaugeIdentityTracker needs exactly 4 IDs"
         self.checkpoint_ids = list(checkpoint_ids)
@@ -176,6 +179,9 @@ class UGaugeIdentityTracker:
             occlusion_hold_seconds if occlusion_hold_seconds is not None
             else self.OCCLUSION_HOLD_SECONDS
         )
+        self.dedupe_px = float(
+            dedupe_px if dedupe_px is not None else self.DEDUPE_PX
+        )
 
         # Pixel thresholds are expressed for a 1280 px wide frame.  Live and
         # recorded sources can have different widths (live is pre-scaled to
@@ -184,6 +190,7 @@ class UGaugeIdentityTracker:
 
         self._slots: List[Optional[Dict[str, Any]]] = [None, None, None, None]
         self._slots_established: bool = False
+        self._slot_last_seen: Dict[int, float] = {}
         self._learn_history: List[List[Tuple[float, float]]] = []
         self._waiting_logged: bool = False
 
@@ -213,6 +220,7 @@ class UGaugeIdentityTracker:
         """Full reset: forget tracks, names and the learned rest layout."""
         self._slots = [None, None, None, None]
         self._slots_established = False
+        self._slot_last_seen = {}
         self._learn_history = []
         self._tracks = []
         self._next_track_id = 1
@@ -322,6 +330,41 @@ class UGaugeIdentityTracker:
         """Where a U-gauge was seen in the previous processed frame."""
         return list(self._last_u_positions)
 
+    def is_slot_occluded(self, rank: int, now: Optional[float] = None) -> bool:
+        """
+        True when this rack slot has no visible gauge, but was occupied within
+        the occlusion hold cooldown (3.0s). The gauge position is held in memory
+        so hand occlusion does not trigger false pickup detection.
+        """
+        if not self._slots_established or rank not in range(len(self._slots)):
+            return False
+        if rank in self._occupied_slots:
+            return False
+        if now is None:
+            now = time.monotonic()
+        last_seen = self._slot_last_seen.get(rank, 0.0)
+        return (now - last_seen) <= self.occlusion_hold_seconds
+
+    def is_slot_missing(self, rank: int, now: Optional[float] = None) -> bool:
+        """
+        True when this slot has been continuously absent for longer than the
+        occlusion hold cooldown (3.0s), confirming the gauge was truly removed.
+        """
+        if not self._slots_established or rank not in range(len(self._slots)):
+            return False
+        if rank in self._occupied_slots:
+            return False
+        if now is None:
+            now = time.monotonic()
+        last_seen = self._slot_last_seen.get(rank, 0.0)
+        return (now - last_seen) > self.occlusion_hold_seconds
+
+    def _is_track_at_slot(self, track: Dict[str, Any], rank: int) -> bool:
+        """True when a track's last known position is at its rack slot."""
+        if 0 <= rank < len(self._slots) and self._slots[rank] is not None:
+            return self._dist(track["pos"], tuple(self._slots[rank]["pos"])) <= self.RACK_BIND_PX * self.scale
+        return False
+
     def away_ranks(
         self,
         occupied_positions: List[Tuple[float, float]],
@@ -358,6 +401,7 @@ class UGaugeIdentityTracker:
                     return [self._active_rank]
 
         missing: List[int] = []
+        now_mono = time.monotonic()
         for rank, slot in enumerate(self._slots):
             if slot is None:
                 continue
@@ -369,10 +413,17 @@ class UGaugeIdentityTracker:
                 continue
             missing.append(rank)
 
-        # Exactly one empty slot: the operator took that gauge.  Several
-        # empty slots without a known active gauge = the hand is covering
-        # them; do not guess.
-        return missing if len(missing) == 1 else []
+        # Exactly one empty slot: the operator took that gauge.
+        if len(missing) == 1:
+            return missing
+
+        # Multiple empty slots: the hand is covering adjacent gauges.
+        # Hold on to slots that are resting under occlusion memory for 3.0s.
+        truly_missing = [
+            r for r in missing
+            if not self.is_slot_occluded(r, now_mono)
+        ]
+        return truly_missing if len(truly_missing) == 1 else []
 
     def adopt_away_gauge(
         self,
@@ -508,6 +559,8 @@ class UGaugeIdentityTracker:
         # leave the rack from an empty slot, which is what tells the gauge at
         # the part apart from its neighbours.
         self._occupied_slots = set()
+        now_mono = time.monotonic()
+        own = self._own_slot_radius()
         for pos in positions:
             best: Optional[Tuple[float, int]] = None
             for rank, slot in enumerate(self._slots):
@@ -515,12 +568,13 @@ class UGaugeIdentityTracker:
                     continue
                 dist = self._dist(pos, tuple(slot["pos"]))
                 if (
-                    dist <= self.stable_px * self.scale
+                    dist <= own
                     and (best is None or dist < best[0])
                 ):
                     best = (dist, rank)
             if best is not None:
                 self._occupied_slots.add(best[1])
+                self._slot_last_seen[best[1]] = now_mono
 
         # 1) Match detections to previous tracks: nearest pair first, one
         #    detection per track.
@@ -719,6 +773,10 @@ class UGaugeIdentityTracker:
             # Another gauge is already in use: the rack stays put.
             if self._active_rank is not None:
                 return False
+            # A gauge resting on its rack slot cannot jump directly into a check area in one frame.
+            # Fast pickups that appear at a hole must be identified by rack slot vacancy memory.
+            if self._point_near_check_area(pos, self._check_areas):
+                return False
             return (
                 rank not in self._occupied_slots
                 and not self._near_other_slot(pos, rank)
@@ -757,6 +815,10 @@ class UGaugeIdentityTracker:
             if self._dist(pos, slot_pos) <= own:
                 return True
             if self._active_rank is not None:
+                return False
+            # A gauge resting at its slot cannot jump directly into an inspection hole in a single frame.
+            # Fast pickups that appear at a hole must be identified by rack slot vacancy memory.
+            if self._point_near_check_area(pos, self._check_areas):
                 return False
             return (
                 rank not in self._occupied_slots
@@ -830,16 +892,38 @@ class UGaugeIdentityTracker:
                 jump,
             )
 
+    @staticmethod
+    def _bbox_iou(box_a: List[int], box_b: List[int]) -> float:
+        xa1, ya1, xa2, ya2 = box_a
+        xb1, yb1, xb2, yb2 = box_b
+        inter_x1 = max(xa1, xb1)
+        inter_y1 = max(ya1, yb1)
+        inter_x2 = min(xa2, xb2)
+        inter_y2 = min(ya2, yb2)
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+        if inter_area <= 0:
+            return 0.0
+        area_a = max(0, xa2 - xa1) * max(0, ya2 - ya1)
+        area_b = max(0, xb2 - xb1) * max(0, yb2 - yb1)
+        union = area_a + area_b - inter_area
+        return inter_area / union if union > 0 else 0.0
+
     def _dedupe(self, dets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Drop duplicate boxes drawn on the same physical gauge."""
-        radius = self.DEDUPE_PX * self.scale
+        radius = self.dedupe_px * self.scale
         ordered = sorted(
             dets, key=lambda d: d.get("confidence", 0.0), reverse=True
         )
         kept: List[Dict[str, Any]] = []
         for det in ordered:
             pos = self._center(det["bbox"])
-            if any(self._dist(pos, self._center(k["bbox"])) <= radius for k in kept):
+            if any(
+                self._dist(pos, self._center(k["bbox"])) <= radius
+                or self._bbox_iou(det["bbox"], k["bbox"]) >= 0.45
+                for k in kept
+            ):
                 continue
             kept.append(det)
         return kept
@@ -853,19 +937,21 @@ class UGaugeIdentityTracker:
                 continue
             track["misses"] = int(track.get("misses", 0)) + 1
             # A named gauge may be hidden by a hand for a few seconds.  It is
-            # still on the rack, so keep its identity reserved.  An unnamed
+            # still on the rack, so keep its identity reserved.  The hold is
+            # time-based: after exactly `occlusion_hold_seconds` the gauge is
+            # treated as genuinely away and its rank is released.  An unnamed
             # track keeps the normal frame timeout.
             if track.get("rank") is not None:
                 last = float(track.get("last_seen_time", 0.0))
                 if now - last <= self.occlusion_hold_seconds:
                     alive.append(track)
                     continue
+                logger.info(
+                    "[UGaugeTracker] Rank-%d released after %.1fs occlusion hold."
+                    % (track["rank"], now - last)
+                )
+                continue
             if track["misses"] > self.TRACK_MAX_MISSES:
-                if track.get("rank") is not None:
-                    logger.info(
-                        "[UGaugeTracker] Rank-%d lost (not seen for %d frames)."
-                        % (track["rank"], track["misses"])
-                    )
                 continue
             alive.append(track)
         self._tracks = alive
@@ -1004,6 +1090,7 @@ class UGaugeIdentityTracker:
 
         self._slots = [{"pos": pos} for pos in averaged]
         self._slots_established = True
+        self._slot_last_seen = {r: time.monotonic() for r in range(4)}
         self._learn_history = []
         self._waiting_logged = False
         logger.info(
@@ -1019,6 +1106,7 @@ class UGaugeIdentityTracker:
     def _bind_ranks(self) -> None:
         """Give unnamed tracks their rank.  A name is never taken away."""
         live = [t for t in self._tracks if t["misses"] == 0]
+        now_mono = time.monotonic()
         # A rank stays reserved while its gauge is hidden by a hand, so a
         # second box can never be given the same name.  After the occlusion
         # hold expires, the rank is released.
@@ -1027,6 +1115,9 @@ class UGaugeIdentityTracker:
             for t in self._tracks
             if t.get("rank") is not None and self._within_occlusion_hold(t)
         }
+        for r in range(4):
+            if self.is_slot_occluded(r, now_mono):
+                reserved.add(r)
 
         # 1) A still gauge lying on a free rack slot gets that slot's rank.
         for track in live:
@@ -1049,35 +1140,52 @@ class UGaugeIdentityTracker:
                 self._name_track(track, rank, rest_pos=self._slots[rank]["pos"])
                 reserved.add(rank)
 
-        # 1b) One slot is empty and one unnamed U-gauge box is at a hole: that
-        #     box is the gauge that was taken out, even if its old track is
-        #     still being remembered at the slot.  With more than one empty
-        #     slot the hand may be covering others, so do not guess.
-        empty = [
-            r for r in range(4)
-            if not any(
-                t.get("rank") == r and t.get("misses", 0) == 0
-                for t in live
-            )
-        ]
+        # 1b) Identify an unnamed U-gauge box near a check hole (Inlet or Outlet):
+        #     - If exactly one rack slot is unoccupied and all other 3 are visibly
+        #       occupied, that unoccupied slot is unambiguously the gauge at the hole.
+        #     - When the operator occludes other gauges, we hold memory of each
+        #       slot position for occlusion_hold_seconds (3.0s). Only a slot that
+        #       is confirmed missing (absent beyond cooldown) or the single missing
+        #       slot once hand clears can be bound.
+        #     - An occluded slot's identity is NEVER stolen.
         at_part = [
             t for t in live
             if t.get("rank") is None
             and self._point_near_check_area(t["pos"], self._check_areas)
         ]
-        if len(empty) == 1 and len(at_part) == 1:
-            rank = empty[0]
-            rest_pos = None
-            if 0 <= rank < len(self._slots) and self._slots[rank] is not None:
-                rest_pos = tuple(self._slots[rank]["pos"])
-            self._name_track(
-                at_part[0],
-                rank,
-                rest_pos=rest_pos,
-                allow_occluded_takeover=True,
-            )
-            reserved.add(rank)
-            self.mark_active(rank)
+        if len(at_part) == 1:
+            candidate_rank: Optional[int] = None
+            allow_takeover = False
+            unoccupied = [
+                r for r in range(4)
+                if r not in self._occupied_slots
+                and not any(t.get("rank") == r and t.get("misses", 0) == 0 for t in live)
+            ]
+            if len(unoccupied) == 1:
+                # All other 3 rack slots are visibly occupied: no ambiguity!
+                candidate_rank = unoccupied[0]
+                allow_takeover = True
+            else:
+                missing_slots = [
+                    r for r in unoccupied
+                    if not self.is_slot_occluded(r, now_mono)
+                ]
+                if len(missing_slots) == 1:
+                    candidate_rank = missing_slots[0]
+                    allow_takeover = True
+
+            if candidate_rank is not None:
+                rest_pos = None
+                if 0 <= candidate_rank < len(self._slots) and self._slots[candidate_rank] is not None:
+                    rest_pos = tuple(self._slots[candidate_rank]["pos"])
+                self._name_track(
+                    at_part[0],
+                    candidate_rank,
+                    rest_pos=rest_pos,
+                    allow_occluded_takeover=allow_takeover,
+                )
+                reserved.add(candidate_rank)
+                self.mark_active(candidate_rank)
 
         # 2) Exactly one free rank and exactly one unnamed gauge: it must be
         #    that gauge.  Covers a gauge picked up before the rack was seen,
@@ -1224,14 +1332,15 @@ class UGaugeIdentityTracker:
         """
         A gauge resting on a known slot has that slot's rank.
 
-        The four gauges always return to their own slot, so while all four
-        are at the rack, position is the most reliable identity.  This also
-        repairs a neighbour swap caused by the nearest-box matching.
+        The four gauges always return to their own slot, so position at the
+        rack is the ground truth. When a gauge is at slot r, it takes rank r
+        immediately, and any other track claiming rank r has it cleared.
         """
         if not self._slots_established:
             return
 
         live = [t for t in self._tracks if t.get("misses", 0) == 0]
+        radius = self._own_slot_radius()
         assigned: Dict[int, Dict[str, Any]] = {}
         for track in live:
             best: Optional[Tuple[float, int]] = None
@@ -1239,16 +1348,15 @@ class UGaugeIdentityTracker:
                 if slot is None or rank in assigned:
                     continue
                 dist = self._dist(track["pos"], tuple(slot["pos"]))
-                if dist <= self.stable_px * self.scale:
+                if dist <= radius:
                     if best is None or dist < best[0]:
                         best = (dist, rank)
             if best is not None:
                 assigned[best[1]] = track
 
-        if len(assigned) != 4:
-            return
-
         for rank, track in assigned.items():
+            if track.get("rank") == rank:
+                continue
             for other in self._tracks:
                 if other is track or other.get("rank") != rank:
                     continue
@@ -1280,6 +1388,13 @@ class UGaugeIdentityTracker:
                     <= self.RACK_BIND_PX * self.scale
                     and self._track_is_still(track)
                 ):
+                    self._active_rank = None
+                elif not self._point_near_check_area(
+                    track["pos"], self._check_areas
+                ):
+                    # The gauge was at a hole and has now been laid on the
+                    # table.  It is no longer the gauge in use, even though
+                    # it is still away from its rack slot.
                     self._active_rank = None
             elif not self._within_occlusion_hold(track):
                 self._active_rank = None
@@ -1555,6 +1670,7 @@ class GaugeValidator:
                     occlusion_hold_seconds=self._u_gauge_cfg.get(
                         "occlusion_hold_seconds", 3.0
                     ),
+                    dedupe_px=self._u_gauge_cfg.get("dedupe_px", 15.0),
                 )
                 logger.info(
                     "[UGaugeTracker] Initialized with checkpoint IDs: "
@@ -2605,28 +2721,71 @@ class GaugeValidator:
 
     def _apply_u_gauge_labels(self, u_dets: List[Dict]) -> None:
         """
-        Give every *identified* U-Gauge detection its real checkpoint name.
+        Give every U-Gauge detection its real checkpoint name.
 
-        The four U-gauges share one YOLO class, so the tracker's per-frame
-        rank map is copied onto each box as ``display_name`` for the overlay.
-
-        No name is invented: a box stays "U Gauge" until the tracker has
-        actually identified it.  The previous top-to-bottom fallback printed
-        a name that looked authoritative but was only a guess, which made an
-        unresolved gauge look like a specific checkpoint.
+        The four U-gauges share one YOLO class ("U Gauge"), but in the UI and
+        everywhere in the system they must always be labeled by their 4 distinct
+        checkpoint names: Inlet Go, Inlet NoGo, LP Go, LP NoGo.
+        Under NO circumstance does any box ever display generic "U Gauge".
         """
-        tracker = self._u_gauge_tracker
-        if tracker is None or not u_dets or not self._u_gauge_cp_ids:
+        if not u_dets or not self._u_gauge_cp_ids:
             return
 
-        rank_map: Dict[int, int] = tracker.rank_map()
+        tracker = self._u_gauge_tracker
+        names = [
+            self.checkpoints[cid].name if cid in self.checkpoints else f"U Gauge {r+1}"
+            for r, cid in enumerate(self._u_gauge_cp_ids)
+        ]
+        rank_map = tracker.rank_map() if tracker else {}
+
+        assigned_ranks = set()
+        # 1. Apply rank from tracker if identified
         for det in u_dets:
             rank = rank_map.get(id(det))
-            if rank is None:
-                continue
-            result = self.checkpoints.get(self._u_gauge_cp_ids[rank])
-            if result is not None:
-                det["display_name"] = result.name
+            if rank is not None and 0 <= rank < len(names):
+                det["display_name"] = names[rank]
+                assigned_ranks.add(rank)
+
+        # 2. For any remaining detections (unranked / newly appeared / occluded hold):
+        unassigned = [d for d in u_dets if not d.get("display_name")]
+        if not unassigned:
+            return
+
+        available = [r for r in range(len(names)) if r not in assigned_ranks]
+
+        # Sort unassigned top-to-bottom
+        unassigned.sort(key=lambda d: (d["bbox"][1] + d["bbox"][3]) / 2)
+
+        if tracker and tracker.slots_established:
+            slots = tracker._slots
+            for det in unassigned:
+                c = [(det["bbox"][0] + det["bbox"][2]) / 2, (det["bbox"][1] + det["bbox"][3]) / 2]
+                best_rank = None
+                best_dist = float("inf")
+                # First check available ranks with established slots
+                for r in available:
+                    if r < len(slots) and slots[r] is not None:
+                        dist = tracker._dist(c, tuple(slots[r]["pos"]))
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_rank = r
+                if best_rank is None and available:
+                    best_rank = available[0]
+                elif best_rank is None:
+                    # All ranks used by duplicates, pick closest slot overall
+                    best_rank = min(
+                        range(len(names)),
+                        key=lambda r: tracker._dist(c, tuple(slots[r]["pos"])) if slots[r] else 9999
+                    )
+
+                det["display_name"] = names[best_rank]
+                if best_rank in available:
+                    available.remove(best_rank)
+        else:
+            # Before slots established: order top-to-bottom
+            for i, det in enumerate(unassigned):
+                r = available[i] if i < len(available) else (i % len(names))
+                det["display_name"] = names[r]
 
     def _u_gauge_check_areas(
         self, part_detections: Dict[str, List[Dict]]
@@ -2669,6 +2828,34 @@ class GaugeValidator:
                 areas.append(self._u_gauge_area_memory[name])
         return areas
 
+    def _any_u_gauge_at_check_area(
+        self, part_detections: Dict[str, List[Dict]]
+    ) -> bool:
+        """
+        True when any U-gauge currently sits at an Inlet/Outlet hole.
+
+        Used only to avoid calling a checkpoint "pending" while the operator
+        is actually using a gauge at a hole but the tracker has not resolved
+        its rank yet.  Both holes are considered; the rank→hole mapping is a
+        preference, not a hard rule.
+        """
+        tracker = self._u_gauge_tracker
+        if tracker is None:
+            return False
+
+        areas = self._u_gauge_check_areas(part_detections)
+        if not areas:
+            return False
+
+        gauge_class = self._u_gauge_cfg.get("gauge_class", "U Gauge")
+        for det in tracker.current_detections():
+            if det.get("class_name") != gauge_class:
+                continue
+            pos = self._center(det["bbox"])
+            if tracker._point_near_check_area(pos, areas):
+                return True
+        return False
+
     def _u_gauge_fallback_track(
         self, cp_id: int, config: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -2683,30 +2870,22 @@ class GaugeValidator:
         if tracker is None:
             return None
 
+        my_rank = int(config["u_gauge_rank"])
+        # Only use this fallback when exactly this rank is the one that is
+        # away from the rack.  Without this guard a gauge left at the hole
+        # after an earlier check could be mistaken for the next gauge.
+        occupied = [
+            self._center(det["bbox"]) for det in tracker.current_detections()
+        ]
+        away = tracker.away_ranks(occupied, radius=25.0 * tracker.scale)
+        if away != [my_rank]:
+            return None
+
         gauge_class = config.get("gauge_class")
         part_classes = set(
             config.get("part_classes")
             or ([config["part_class"]] if config.get("part_class") else [])
         )
-
-        # The other U-gauge checkpoint that uses the same hole.
-        partner_ids = [
-            other_id
-            for other_id, other in self._checkpoint_configs.items()
-            if other_id != cp_id
-            and other.get("gauge_class") == gauge_class
-            and part_classes
-            & set(
-                other.get("part_classes")
-                or ([other["part_class"]] if other.get("part_class") else [])
-            )
-        ]
-        if not partner_ids:
-            return None
-        if any(
-            self.checkpoints[pid].status != GaugeStatus.OK for pid in partner_ids
-        ):
-            return None
 
         method = config.get("method", "near")
         near_thresh = config.get(
@@ -2732,7 +2911,7 @@ class GaugeValidator:
                     return {
                         "bbox": det["bbox"],
                         "pos": self._center(det["bbox"]),
-                        "rank": config["u_gauge_rank"],
+                        "rank": my_rank,
                         "rest_pos": None,
                         "misses": 0,
                     }
@@ -2750,10 +2929,9 @@ class GaugeValidator:
 
         The identity tracker now names each physical gauge and follows it, so
         this method simply asks: "where is the gauge with my rank right now,
-        and is it in the correct hole?"  There is no shared "held gauge"
-        state any more — the four gauges are evaluated independently, which
-        is what lets Inlet NoGo be checked while Inlet Go is lying on the
-        table.
+        and is it at a check hole?"  There is no shared "held gauge" state any
+        more — the four gauges are evaluated independently, which is what lets
+        Inlet NoGo be checked while Inlet Go is lying on the table.
         """
         tracker = self._u_gauge_tracker
         my_rank: int = config["u_gauge_rank"]
@@ -2783,20 +2961,25 @@ class GaugeValidator:
         track = tracker.track_for_rank(my_rank)
         if track is None and tracker.is_occluded(my_rank):
             # A hand/arm is covering the gauge.  The gauge itself has not
-            # moved, so keep the checkpoint's progress instead of resetting
-            # it.  An already-latched OK stays OK.
+            # moved, so keep its identity, position and checkpoint progress.
+            # An occlusion is never evidence that the gauge is missing.
             result.grace_count = 0
             if result.status != GaugeStatus.OK:
-                result.status = (
-                    GaugeStatus.WAITING
-                    if result.ok_first_seen > 0.0
-                    else GaugeStatus.NO_GAUGE
-                )
+                result.status = GaugeStatus.WAITING
             return
         if track is None:
             track = self._u_gauge_fallback_track(cp_id, config)
             if track is None:
-                self._handle_missing(result, GaugeStatus.NO_GAUGE)
+                # The gauge is no longer at its remembered rack position.
+                # If a U-gauge is at an Inlet/Outlet hole it may be the one
+                # being used; wait for the tracker to name it instead of
+                # guessing.  Otherwise it has simply been laid on the table:
+                # keep the checkpoint PENDING (it will be seen again).
+                if self._any_u_gauge_at_check_area(part_detections):
+                    result.grace_count = 0
+                    result.status = GaugeStatus.WAITING
+                else:
+                    self._handle_missing(result, GaugeStatus.PENDING)
                 return
             result.confidence = 0.5     # position-only identification
         else:
@@ -2817,10 +3000,10 @@ class GaugeValidator:
                     * tracker.scale
                 )
                 if moved < min_move:
-                    self._handle_missing(result, GaugeStatus.NO_GAUGE)
+                    self._handle_missing(result, GaugeStatus.PENDING)
                     return
 
-        # ── Spatial check against the correct hole ───────────────────────
+        # ── Spatial check against a check hole ───────────────────────────
         result.grace_count = 0
 
         method = config.get("method", "near")
@@ -2836,6 +3019,13 @@ class GaugeValidator:
             for pc in part_classes
             if pc in self._last_known_parts
         ]
+        # The rank→hole mapping is a preference.  When cross-hole checking is
+        # enabled, a gauge carried to the other Inlet/Outlet hole is still a
+        # gauge being used, so it may latch instead of being rejected.
+        if self._u_gauge_cfg.get("allow_cross_hole_check", True):
+            for area in self._u_gauge_check_areas(part_detections):
+                if area not in target_bboxes:
+                    target_bboxes.append(area)
 
         is_valid = False
         overlap = 0.0
@@ -2843,6 +3033,8 @@ class GaugeValidator:
             valid_for_area, overlap_for_area = self._evaluate_spatial(
                 track["bbox"], part_bbox, method, overlap_thresh, near_thresh,
             )
+            if not valid_for_area and tracker._point_near_check_area(track["pos"], [part_bbox]):
+                valid_for_area = True
             is_valid = is_valid or valid_for_area
             overlap = max(overlap, overlap_for_area)
 
@@ -2864,6 +3056,9 @@ class GaugeValidator:
             else:
                 result.status = GaugeStatus.UNCERTAIN
         else:
+            # A U-gauge is only "checked" when it reaches a check hole.  A
+            # missing or occluded gauge must never raise NG; keep it waiting
+            # or pending until the operator actually uses it.
             result.spatial_miss_count += 1
             if (
                 result.ok_first_seen > 0.0
@@ -2875,7 +3070,10 @@ class GaugeValidator:
             result.ok_first_seen = 0.0
             result.dwell_progress = 0.0
             result.ok_count = max(0, result.ok_count - 1)
-            result.status = GaugeStatus.NG
+            if self._any_u_gauge_at_check_area(part_detections):
+                result.status = GaugeStatus.WAITING
+            else:
+                result.status = GaugeStatus.PENDING
 
     def _handle_missing(self, result: CheckpointResult, missing_status: GaugeStatus) -> None:
         """

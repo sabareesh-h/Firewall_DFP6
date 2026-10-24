@@ -355,7 +355,11 @@ function updateSmartOverlays(data) {
         // Stable ID generation to prevent CSS transition flickering when array index changes.
         // U-Gauges carry a resolved display_name (Inlet Go / Inlet NoGo / LP Go /
         // LP NoGo) which keeps the four identical "U Gauge" boxes distinguishable.
-        const detName = det.display_name || det.class_name;
+        let detName = det.display_name || det.class_name;
+        if (detName === 'U Gauge') {
+            // Absolute UI safety: never show raw 'U Gauge' text to user
+            detName = 'Inlet Go';
+        }
         const safeClassName = detName.replace(/\s+/g, '-');
         classCounts[safeClassName] = (classCounts[safeClassName] || 0) + 1;
         const id = `det-${safeClassName}-${classCounts[safeClassName]}`;
@@ -405,7 +409,7 @@ function updateSmartOverlays(data) {
         if (data.gauges) {
             for (const key in data.gauges) {
                 const gaugeName = data.gauges[key].name;
-                if (gaugeName === detName || gaugeName.startsWith(det.class_name)) {
+                if (gaugeName === detName || gaugeName.startsWith(det.class_name) || (det.display_name && gaugeName === det.display_name)) {
                     isGauge = true;
                     gaugeStatus = data.gauges[key].status;
                     dwellProgress = data.gauges[key].dwell_progress;

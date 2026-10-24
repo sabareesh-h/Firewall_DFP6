@@ -523,3 +523,37 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print(f"PASS {name}")
+
+def test_hand_occluding_adjacent_gauge_does_not_falsely_identify_it():
+    """
+    Operator picks up Inlet Go (rank 0), but hand occludes Inlet NoGo (rank 1)
+    in the meantime. The software must hold memory of Inlet NoGo's slot position
+    for the cooldown, not wrongly identify it as Inlet NoGo, and when the hand
+    moves away, correctly identify Inlet Go as checked while Inlet NoGo stays PENDING.
+    """
+    v = make_validator()
+    learn(v)
+
+    # Operator picks up rank 0 and moves it to INLET_HOLE, but hand occludes
+    # rank 1 on the rack (only ranks 2 and 3 visible on rack).
+    # Rank 0 is at INLET_HOLE; rank 1 is missing/occluded; ranks 2 and 3 on rack.
+    for _ in range(3):
+        v.validate(frame([RACK[2], RACK[3], INLET_HOLE]), frame_width=1496)
+        time.sleep(HOLD * 1.5)
+
+    # Inlet NoGo (cp 5) MUST NOT be falsely identified or latched OK!
+    assert v.checkpoints[5].status.value != "OK", (
+        "Inlet NoGo must not be falsely checked while it is occluded by the hand"
+    )
+
+    # Hand moves away from the rack: rank 1 is visible again at its slot!
+    for _ in range(4):
+        v.validate(frame(RACK[1:] + [INLET_HOLE]), frame_width=1496)
+        time.sleep(HOLD * 1.5)
+
+    # Inlet Go (cp 4) is confirmed checked at Inlet Hole
+    assert v.checkpoints[4].status.value == "OK", "Inlet Go should latch OK"
+    # Inlet NoGo (cp 5) never left the rack and must remain PENDING
+    assert v.checkpoints[5].status.value == "PENDING", (
+        "Inlet NoGo was resting on the table and must remain PENDING"
+    )

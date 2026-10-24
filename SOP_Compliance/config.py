@@ -16,7 +16,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 # Default video file for testing
-DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-12 104913-cut-merged-1789195228187-00.12.57.169-00.13.32.307.mp4"
+DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-29 110701.mp4"
 
 # Hikvision Camera URL
 LIVE_CAMERA_URL = "rtsp://admin:Wedit@2024@192.168.1.66:554/Streaming/Channels/101"
@@ -40,7 +40,7 @@ OK_HOLD_SECONDS = 0.1
 # ─── Part-Presence State Machine ─────────────────────────────────────────────
 GAUGE_GRACE_FRAMES = 15
 PART_CLEAR_TIME_COMPLETE = 3.0
-PART_CLEAR_TIME_INSPECTING = 3.0
+PART_CLEAR_TIME_INSPECTING = 8.0
 
 # ─── Privacy Blur / Ignore Zone ──────────────────────────────────────────────
 # Rectangular area of the frame that is blurred in the video feed AND excluded
@@ -309,6 +309,7 @@ PROFILES = {
             "min_stable_frames": 8,            # stable frames before rest slots are learned
             "learning_max_spread": 250,        # reject a "rest layout" this far apart (px)
             "checkpoint_ids": [4, 5, 6, 7],    # must match checkpoint ids below
+            "dedupe_px": 15.0,
 
             # The model sometimes reports a U-gauge as 8mm / 11mm while the
             # operator is checking it at the Inlet/Outlet hole.  One gauge is
@@ -319,11 +320,20 @@ PROFILES = {
             # rack, nothing is re-labelled.
             "confusable_classes": ["8mm", "11mm"],
 
-            # A hand can hide a gauge for a moment.  Keep its identity (and
-            # the checkpoint's progress) for this many seconds instead of
-            # forgetting it.  The gauges do not move on their own; only the
-            # one the operator carries to the part does.
+            # A hand can hide one or more gauges for a moment.  Keep the
+            # identity, position and checkpoint progress of *every* hidden
+            # gauge for this many seconds instead of deciding that it was
+            # taken.  The gauges do not move on their own; only the one the
+            # operator carries to the part does.  While hidden the checkpoint
+            # is WAITING; if the gauge is later confirmed away and is not at
+            # an Inlet/Outlet hole it stays PENDING (never a false NG).
             "occlusion_hold_seconds": 3.0,
+
+            # The normal workflow is ranks 0/1 at the Inlet and 2/3 at the
+            # Outlet, but this mapping is a preference, not a hard rule.
+            # When True, a gauge taken to the other hole is still accepted
+            # as checked instead of being rejected or reported NG.
+            "allow_cross_hole_check": True,
         },
 
         # SOP validation checkpoints
