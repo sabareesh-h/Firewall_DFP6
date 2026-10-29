@@ -333,111 +333,285 @@ function handleStatusUpdate(data) {
     }
 }
 
-// ─── Smart Focus Overlays ───────────────────────────────────────────────────
+// ─── Smart Focus Overlays (Live Video HUD with Collision Avoidance) ───
 let previousBoxIds = new Set();
+
+const KNOWN_GAUGE_CLASSES = new Set([
+    'Distance', 'Pin', 'Dia', 'M6', 'M8', '11mm', '13mm', '8mm', 'Outer Seal', 'U Gauge',
+    'Inlet Go', 'Inlet NoGo', 'LP Go', 'LP NoGo'
+]);
+
+function getShortGaugeName(name) {
+    if (!name) return '';
+    return name
+        .replace(/\s*Gauge/gi, '')
+        .replace(/\s*Thread/gi, '')
+        .trim();
+}
+
+function rectOverlapArea(r1, r2) {
+    const xo = Math.max(0, Math.min(r1.x2, r2.x2) - Math.max(r1.x1, r2.x1));
+    const yo = Math.max(0, Math.min(r1.y2, r2.y2) - Math.max(r1.y1, r2.y1));
+    return xo * yo;
+}
+
+/**
+ * Renders transparent bounding boxes and always-visible HUD labels over detected gauges.
+ * Uses smart collision avoidance so labels never overlap other gauges or other labels.
+ */
 function updateSmartOverlays(data) {
     const container = document.getElementById('smart-overlay-container');
-    const canvas = document.getElementById('video-canvas');
+    const canvas    = document.getElementById('video-canvas');
     if (!container || !canvas || !data.raw_detections) return;
 
-    // We calculate scaling factor based on original frame size vs rendered canvas client size
     const cw = canvas.clientWidth;
     const ch = canvas.clientHeight;
-    if (cw === 0 || ch === 0) return; // Not visible yet
+    if (cw === 0 || ch === 0) return;
 
-    const scaleX = cw / (data.frame_width || 1280);
+    const scaleX = cw / (data.frame_width  || 1280);
     const scaleY = ch / (data.frame_height || 720);
 
     const currentBoxIds = new Set();
-    const classCounts = {};
+    const classCounts   = {};
 
+    const gaugeItems    = [];
+    const nonGaugeItems = [];
+
+    // Step 1: Parse and classify all detections
     data.raw_detections.forEach((det) => {
-        // Stable ID generation to prevent CSS transition flickering when array index changes.
-        // U-Gauges carry a resolved display_name (Inlet Go / Inlet NoGo / LP Go /
-        // LP NoGo) which keeps the four identical "U Gauge" boxes distinguishable.
         let detName = det.display_name || det.class_name;
-        if (detName === 'U Gauge') {
-            // Absolute UI safety: never show raw 'U Gauge' text to user
-            detName = 'Inlet Go';
-        }
+        if (detName === 'U Gauge') detName = 'Inlet Go';
+
         const safeClassName = detName.replace(/\s+/g, '-');
         classCounts[safeClassName] = (classCounts[safeClassName] || 0) + 1;
         const id = `det-${safeClassName}-${classCounts[safeClassName]}`;
-        
         currentBoxIds.add(id);
 
-        let box = document.getElementById(id);
+        const [x1, y1, x2, y2] = det.bbox;
+        const boxLeft   = x1 * scaleX;
+        const boxTop    = y1 * scaleY;
+        const boxWidth  = (x2 - x1) * scaleX;
+        const boxHeight = (y2 - y1) * scaleY;
+
+        const isGauge = KNOWN_GAUGE_CLASSES.has(det.class_name) || KNOWN_GAUGE_CLASSES.has(detName);
+
+        const item = {
+            det,
+            detName,
+            id,
+            boxLeft,
+            boxTop,
+            boxWidth,
+            boxHeight,
+            bbox: {
+                x1: boxLeft,
+                y1: boxTop,
+                x2: boxLeft + boxWidth,
+                y2: boxTop + boxHeight
+            }
+        };
+
+        if (isGauge) {
+            gaugeItems.push(item);
+        } else {
+            nonGaugeItems.push(item);
+        }
+    });
+
+    // Step 2: Render Part / Hand items (boxes only, labels hidden)
+    nonGaugeItems.forEach((item) => {
+        let box = document.getElementById(item.id);
         if (!box) {
             box = document.createElement('div');
-            box.id = id;
-            box.className = 'smart-box';
-            
+            box.id = item.id;
+            box.className = 'smart-box idle-part';
             const label = document.createElement('div');
             label.className = 'smart-label';
             box.appendChild(label);
-            
             container.appendChild(box);
         }
 
-        // Positioning
-        const [x1, y1, x2, y2] = det.bbox;
-        const left = x1 * scaleX;
-        const top = y1 * scaleY;
-        const width = (x2 - x1) * scaleX;
-        const height = (y2 - y1) * scaleY;
+        box.style.left   = `${item.boxLeft}px`;
+        box.style.top    = `${item.boxTop}px`;
+        box.style.width  = `${item.boxWidth}px`;
+        box.style.height = `${item.boxHeight}px`;
+        box.className    = 'smart-box idle-part';
+        box.style.borderColor = (item.det.class_name === 'Hand') ? 'rgba(220, 38, 38, 0.4)' : '';
+    });
 
-        box.style.left = `${left}px`;
-        box.style.top = `${top}px`;
-        box.style.width = `${width}px`;
-        box.style.height = `${height}px`;
-
-        // Content
-        const labelDiv = box.querySelector('.smart-label');
-        let labelText = detName;
-        if (data.show_confidence_score) {
-            labelText += ` <span>${det.confidence.toFixed(2)}</span>`;
-        }
-        labelDiv.innerHTML = labelText;
-
-        // Styling State
-        let isGauge = false;
-        let gaugeStatus = null;
+    // Step 3: Match gauge status and prepare for smart label layout
+    gaugeItems.forEach((item) => {
+        let gaugeStatus   = null;
         let dwellProgress = 0;
+        let matchedName   = item.detName;
 
-        // Match YOLO class name (e.g., "Pin") with gauge name (e.g., "Pin Gauge").
-        // U-Gauges match on their resolved display name instead.
         if (data.gauges) {
             for (const key in data.gauges) {
-                const gaugeName = data.gauges[key].name;
-                if (gaugeName === detName || gaugeName.startsWith(det.class_name) || (det.display_name && gaugeName === det.display_name)) {
-                    isGauge = true;
-                    gaugeStatus = data.gauges[key].status;
-                    dwellProgress = data.gauges[key].dwell_progress;
+                const g = data.gauges[key];
+                if (!g) continue;
+                const gName = g.name.trim();
+                const dName = item.detName.trim();
+                const cName = item.det.class_name.trim();
+
+                const isMatch = (
+                    gName === dName ||
+                    (item.det.display_name && gName === item.det.display_name) ||
+                    gName.startsWith(cName) ||
+                    dName.startsWith(gName) ||
+                    (cName === 'M6' && gName.startsWith('M6')) ||
+                    (cName === 'M8' && gName.startsWith('M8')) ||
+                    (cName === 'Dia' && gName.startsWith('Dia')) ||
+                    (cName === 'Pin' && gName.startsWith('Pin')) ||
+                    (cName === 'Distance' && gName.startsWith('Distance')) ||
+                    (cName === '11mm' && gName.startsWith('11mm')) ||
+                    (cName === '13mm' && gName.startsWith('13mm')) ||
+                    (cName === '8mm' && gName.startsWith('8mm')) ||
+                    (cName === 'Outer Seal' && gName.startsWith('Outer Seal'))
+                );
+
+                if (isMatch) {
+                    gaugeStatus   = g.status;
+                    dwellProgress = g.dwell_progress || 0;
+                    matchedName   = g.name;
                     break;
                 }
             }
         }
-        
-        // Parts usually aren't gauges
-        if (det.class_name === 'Part' || det.class_name === 'Hand' || !isGauge) {
-            box.className = 'smart-box idle-part';
-            if (det.class_name === 'Hand') {
-                box.style.borderColor = 'rgba(220, 38, 38, 0.4)';
-                labelDiv.style.background = 'rgba(220, 38, 38, 0.6)';
-            }
-        } else {
-            // It's a Gauge
-            if (dwellProgress > 0 || gaugeStatus === 'UNCERTAIN') {
-                box.className = 'smart-box active';
-                labelDiv.innerHTML = `🎯 ${labelText}`;
-            } else {
-                box.className = 'smart-box idle-gauge';
-            }
+
+        item.gaugeStatus   = gaugeStatus;
+        item.dwellProgress = dwellProgress;
+        item.matchedName   = matchedName;
+        item.isChecked     = (gaugeStatus === 'OK');
+        item.isActive      = !item.isChecked && (dwellProgress > 0 || gaugeStatus === 'UNCERTAIN');
+
+        const shortName = getShortGaugeName(matchedName || item.detName);
+        let labelText = shortName;
+        if (item.isChecked) {
+            labelText = `✓ ${shortName}`;
+        } else if (item.isActive && dwellProgress > 0) {
+            labelText = `${shortName} (${Math.round(dwellProgress * 100)}%)`;
         }
+        if (data.show_confidence_score) {
+            labelText += ` — ${item.det.confidence.toFixed(2)}`;
+        }
+        item.labelText = labelText;
     });
 
-    // Remove old boxes that disappeared
-    previousBoxIds.forEach(id => {
+    // Sort gauges top-to-bottom so higher gauges place labels first
+    gaugeItems.sort((a, b) => a.bbox.y1 - b.bbox.y1);
+
+    // Step 4: Position gauge boxes and compute collision-free label placements
+    const placedLabels = [];
+
+    gaugeItems.forEach((item, idx) => {
+        let box = document.getElementById(item.id);
+        if (!box) {
+            box = document.createElement('div');
+            box.id = item.id;
+            box.className = 'smart-box';
+            const label = document.createElement('div');
+            label.className = 'smart-label';
+            box.appendChild(label);
+            container.appendChild(box);
+        }
+
+        box.style.left   = `${item.boxLeft}px`;
+        box.style.top    = `${item.boxTop}px`;
+        box.style.width  = `${item.boxWidth}px`;
+        box.style.height = `${item.boxHeight}px`;
+        box.style.borderColor = '';
+
+        if (item.isChecked) {
+            box.className = 'smart-box gauge-checked';
+        } else if (item.isActive) {
+            box.className = 'smart-box gauge-active';
+        } else {
+            box.className = 'smart-box gauge-unchecked';
+        }
+
+        const labelDiv = box.querySelector('.smart-label');
+        if (!labelDiv) return;
+        labelDiv.textContent = item.labelText;
+
+        // Label dimensions
+        const lw = Math.max(36, (item.labelText.length * 6.5) + 16);
+        const lh = 20;
+        const gap = 5;
+
+        const b = item.bbox;
+
+        // Candidate placement positions around this gauge's bounding box
+        const candidates = [
+            { name: 'above',       x: (b.x1 + b.x2)/2 - lw/2, y: b.y1 - lh - gap, pref: 0 },
+            { name: 'below',       x: (b.x1 + b.x2)/2 - lw/2, y: b.y2 + gap,      pref: 5 },
+            { name: 'right',       x: b.x2 + gap,            y: (b.y1 + b.y2)/2 - lh/2, pref: 10 },
+            { name: 'left',        x: b.x1 - lw - gap,       y: (b.y1 + b.y2)/2 - lh/2, pref: 10 },
+            { name: 'above-right', x: b.x2 - 10,             y: b.y1 - lh - gap, pref: 20 },
+            { name: 'above-left',  x: b.x1 - lw + 10,        y: b.y1 - lh - gap, pref: 20 },
+            { name: 'below-right', x: b.x2 - 10,             y: b.y2 + gap,      pref: 25 },
+            { name: 'below-left',  x: b.x1 - lw + 10,        y: b.y2 + gap,      pref: 25 },
+            { name: 'far-below',   x: (b.x1 + b.x2)/2 - lw/2, y: b.y2 + lh + gap + 4, pref: 35 },
+            { name: 'far-right',   x: b.x2 + gap + 30,       y: (b.y1 + b.y2)/2 - lh/2, pref: 40 },
+            { name: 'far-left',    x: b.x1 - lw - gap - 30,  y: (b.y1 + b.y2)/2 - lh/2, pref: 40 },
+            { name: 'far-above',   x: (b.x1 + b.x2)/2 - lw/2, y: b.y1 - 2*lh - gap - 4, pref: 45 }
+        ];
+
+        let bestCand = candidates[0];
+        let bestScore = Infinity;
+
+        for (let c of candidates) {
+            const candRect = { x1: c.x, y1: c.y, x2: c.x + lw, y2: c.y + lh };
+            let score = c.pref;
+
+            // 1. Penalty for overlapping ANY OTHER gauge bounding box (so gauge is never hidden!)
+            for (let j = 0; j < gaugeItems.length; j++) {
+                if (idx === j) continue;
+                const ob = gaugeItems[j].bbox;
+                const paddedOther = { x1: ob.x1 - 1, y1: ob.y1 - 1, x2: ob.x2 + 1, y2: ob.y2 + 1 };
+                const area = rectOverlapArea(candRect, paddedOther);
+                if (area > 0) {
+                    score += area * 100 + 5000;
+                }
+            }
+
+            // 2. Penalty for overlapping ANY ALREADY PLACED label (so labels never overlap!)
+            for (let k = 0; k < placedLabels.length; k++) {
+                const pl = placedLabels[k];
+                const paddedPl = { x1: pl.x1 - 1, y1: pl.y1 - 1, x2: pl.x2 + 1, y2: pl.y2 + 1 };
+                const area = rectOverlapArea(candRect, paddedPl);
+                if (area > 0) {
+                    score += area * 200 + 10000;
+                }
+            }
+
+            // 3. Penalty for falling outside the video canvas viewport
+            if (candRect.x1 < 4) score += (4 - candRect.x1) * 500 + 3000;
+            if (candRect.y1 < 4) score += (4 - candRect.y1) * 500 + 3000;
+            if (candRect.x2 > cw - 4) score += (candRect.x2 - (cw - 4)) * 500 + 3000;
+            if (candRect.y2 > ch - 4) score += (candRect.y2 - (ch - 4)) * 500 + 3000;
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestCand = { ...c, rect: candRect };
+                if (score === c.pref) {
+                    // Perfect collision-free position found!
+                    break;
+                }
+            }
+        }
+
+        placedLabels.push(bestCand.rect);
+
+        // Position the label element relative to its box
+        labelDiv.style.left      = `${bestCand.x - item.boxLeft}px`;
+        labelDiv.style.top       = `${bestCand.y - item.boxTop}px`;
+        labelDiv.style.bottom    = 'auto';
+        labelDiv.style.transform = 'none';
+        labelDiv.className       = `smart-label placement-${bestCand.name}`;
+    });
+
+    // Step 5: Remove stale boxes
+    previousBoxIds.forEach((id) => {
         if (!currentBoxIds.has(id)) {
             const el = document.getElementById(id);
             if (el) el.remove();

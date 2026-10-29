@@ -1,0 +1,16 @@
+# Core Framework & Web Server
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+websockets>=12.0
+pydantic>=2.0.0
+
+# Computer Vision & AI
+opencv-python>=4.8.0
+ultralytics>=8.1.0
+numpy>=1.24.0
+pillow>=10.0.0
+PyYAML>=6.0
+
+# Hardware & System Integration
+pynput>=1.7.6
+requests>=2.31.0

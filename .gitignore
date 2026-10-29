@@ -1,16 +1,25 @@
 # Videos and Datasets
 *.mp4
 *.zip
+*.pdf
 frames/
 frames_2/
 TML Trail 2 with part/
+Dataset/
 
-# Python
+# Python & Executables
 __pycache__/
 *.pyc
+*.exe
 .env
 venv/
 env/
+Software/
+
+# Scratch & Temporary HTML
+r_files/
+r.html
+Sidebar.html
 
 # Model Weights
 **/*.pt

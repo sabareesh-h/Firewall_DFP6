@@ -16,7 +16,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 # Default video file for testing
-DEFAULT_VIDEO_PATH = r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-09-29 110701.mp4"
+_LOCAL_VIDEO = os.path.join(BASE_DIR, "video.mp4")
+DEFAULT_VIDEO_PATH = _LOCAL_VIDEO if os.path.exists(_LOCAL_VIDEO) else r"C:\Users\RohithSuryaCKM\Videos\Screen Recordings\Screen Recording 2026-10-10 141820.mp4"
 
 # Hikvision Camera URL
 LIVE_CAMERA_URL = "rtsp://admin:Wedit@2024@192.168.1.66:554/Streaming/Channels/101"
@@ -206,6 +207,7 @@ PROFILES = {
                 "gauge_class": "Dia",
                 "part_class": "DS Thread",
                 "method": "near",
+                "near_distance_threshold": 180,
                 "description": "Dia Gauge near DS Thread",
             },
             {

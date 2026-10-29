@@ -2344,27 +2344,42 @@ class GaugeValidator:
           accumulation for that frame (treating Dia as if it were absent).
         """
         # ── Pin / Dia mutual-exclusion pre-check ──────────────────────────
-        # Detect whether Pin is on top of the DS Thread and Dia is inside the Part
-        # so the Dia checkpoint can be suppressed in the same frame.
-        pin_on_ds_thread = False
-        if "Pin" in gauge_detections and "DS Thread" in part_detections:
-            best_pin  = max(gauge_detections["Pin"],  key=lambda d: d["confidence"])
-            best_ds_thread = max(part_detections["DS Thread"],   key=lambda d: d["confidence"])
-            _pin_valid, _ = self._evaluate_spatial(
-                best_pin["bbox"], best_ds_thread["bbox"], "intersects"
-            )
-            pin_on_ds_thread = _pin_valid
+        # When BOTH Pin gauge and Dia gauge are inside the part simultaneously:
+        # ONLY Pin gauge is accepted as checked. Dia gauge is NOT accepted.
+        # Dia has to be inside the part without Pin gauge.
+        pin_present_in_part = False
+        if "Pin" in gauge_detections:
+            if "DS Thread" in part_detections:
+                for pin_d in gauge_detections["Pin"]:
+                    for ds_d in part_detections["DS Thread"]:
+                        _v, _ = self._evaluate_spatial(pin_d["bbox"], ds_d["bbox"], "intersects")
+                        if _v:
+                            pin_present_in_part = True
+                            break
+                    if pin_present_in_part:
+                        break
+            if not pin_present_in_part and "Part" in part_detections:
+                for pin_d in gauge_detections["Pin"]:
+                    for p_d in part_detections["Part"]:
+                        _v, _ = self._evaluate_spatial(pin_d["bbox"], p_d["bbox"], "intersects")
+                        if _v:
+                            pin_present_in_part = True
+                            break
+                    if pin_present_in_part:
+                        break
 
         dia_inside_part = False
-        if "Dia" in gauge_detections and "Part" in part_detections:
-            best_dia  = max(gauge_detections["Dia"],  key=lambda d: d["confidence"])
-            best_part = max(part_detections["Part"],   key=lambda d: d["confidence"])
-            _dia_valid, _ = self._evaluate_spatial(
-                best_dia["bbox"], best_part["bbox"], "intersects"
-            )
-            dia_inside_part = _dia_valid
-            
-        suppress_dia = pin_on_ds_thread and dia_inside_part
+        if "Dia" in gauge_detections and "DS Thread" in part_detections:
+            for dia_d in gauge_detections["Dia"]:
+                for ds_d in part_detections["DS Thread"]:
+                    _v, _ = self._evaluate_spatial(dia_d["bbox"], ds_d["bbox"], "intersects")
+                    if _v:
+                        dia_inside_part = True
+                        break
+                if dia_inside_part:
+                    break
+
+        suppress_dia = pin_present_in_part and dia_inside_part
 
         for cp_id, config in self._checkpoint_configs.items():
             result = self.checkpoints[cp_id]
@@ -2445,7 +2460,7 @@ class GaugeValidator:
             # Both gauge and part are in frame (or part is remembered) — evaluate spatial check
             result.grace_count = 0   # reset grace since gauge is visible
 
-            best_gauge = max(gauge_detections[gauge_class], key=lambda d: d["confidence"])
+            candidate_gauges = gauge_detections[gauge_class]
 
             # Remember every visible target area (used if it gets occluded).
             # A checkpoint may list multiple areas (e.g. Inlet OR Outlet).
@@ -2465,17 +2480,29 @@ class GaugeValidator:
             overlap_thresh = config.get("overlap_threshold", self.overlap_threshold)
             near_thresh = config.get("near_distance_threshold", self.near_distance_threshold)
 
-            # A checkpoint passes spatial validation if ANY of its target areas
-            # passes (Inlet OR Outlet for the HMI 8mm / 11mm gauges).
+            # A checkpoint passes spatial validation if ANY candidate gauge
+            # satisfies the condition against ANY of its target areas.
             is_valid = False
             overlap = 0.0
-            for part_bbox in target_bboxes:
-                valid_for_area, overlap_for_area = self._evaluate_spatial(
-                    best_gauge["bbox"], part_bbox, method,
-                    overlap_thresh, near_thresh,
-                )
-                is_valid = is_valid or valid_for_area
-                overlap = max(overlap, overlap_for_area)
+            matched_gauge = None
+
+            for gauge in candidate_gauges:
+                for part_bbox in target_bboxes:
+                    valid_for_area, overlap_for_area = self._evaluate_spatial(
+                        gauge["bbox"], part_bbox, method,
+                        overlap_thresh, near_thresh,
+                    )
+                    if valid_for_area:
+                        is_valid = True
+                        matched_gauge = gauge
+                        overlap = max(overlap, overlap_for_area)
+                        break
+                if is_valid:
+                    break
+
+            if matched_gauge is None:
+                matched_gauge = max(candidate_gauges, key=lambda d: d["confidence"])
+            best_gauge = matched_gauge
 
             # ── Movement / resting-position check ─────────────────────────
             if self._track_movement:

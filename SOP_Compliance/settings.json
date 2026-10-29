@@ -6,9 +6,9 @@
     "gauge_configs": [
         {
             "id": 1,
-            "method": "near",
+            "method": "fully_inside",
             "overlap_threshold": 0.15,
-            "near_distance_threshold": 50
+            "near_distance_threshold": 150
         },
         {
             "id": 2,
@@ -18,9 +18,9 @@
         },
         {
             "id": 3,
-            "method": "fully_inside",
+            "method": "near",
             "overlap_threshold": 0.15,
-            "near_distance_threshold": 150
+            "near_distance_threshold": 50
         },
         {
             "id": 4,
@@ -44,11 +44,11 @@
             "id": 7,
             "method": "near",
             "overlap_threshold": 0.15,
-            "near_distance_threshold": 60
+            "near_distance_threshold": 30
         }
     ],
     "visual_deadzone": null,
-    "active_profile": "TML",
+    "active_profile": "HMI",
     "blur_enabled": true,
     "blur_zone": [
         0.0,

@@ -130,77 +130,283 @@
             color: white;
         }
 
-        /* ─── Smart Focus Overlays ─── */
+                        /* ─── Smart Focus Overlays (Live Video HUD) ─── */
         .smart-box {
             position: absolute;
             box-sizing: border-box;
             border-radius: 4px;
+            pointer-events: auto;
+            cursor: default;
+            transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* Not Checked Gauges: Grey Highly Transparent */
+        .smart-box.gauge-unchecked,
+        .smart-box.idle-gauge {
+            border: 1.5px solid rgba(148, 163, 184, 0.55);
+            background: rgba(100, 116, 139, 0.08);
+            box-shadow: 0 0 4px rgba(100, 116, 139, 0.15);
+            z-index: 8;
+        }
+
+        /* Checked Gauges: Green Highly Transparent */
+        .smart-box.gauge-checked {
+            border: 2px solid rgba(34, 197, 94, 0.75);
+            background: rgba(34, 197, 94, 0.10);
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.25);
+            z-index: 12;
+        }
+
+        /* Actively Dwelling / In-Progress Gauges: Glowing Green Transparent */
+        .smart-box.gauge-active,
+        .smart-box.active {
+            border: 2px solid rgba(74, 222, 128, 0.90);
+            background: rgba(34, 197, 94, 0.16);
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.40);
+            z-index: 15;
+        }
+
+        /* Part & Hand bounding boxes - labels hidden so only gauges overlay */
+        .smart-box.idle-part {
+            border: 1px dashed rgba(255, 204, 0, 0.18);
+            background: transparent;
+            z-index: 4;
             pointer-events: none;
         }
-        
-        .smart-box.idle-gauge {
-            border: 1px dashed rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.02);
-        }
-        
-        .smart-box.idle-part {
-            border: 2px solid rgba(255, 204, 0, 0.2);
-            background: rgba(255, 204, 0, 0.02);
+        .smart-box.idle-part .smart-label {
+            display: none !important; /* Hide part labels to keep live feed clean for gauges */
         }
 
-        .smart-box.active {
-            border: 2px solid #0ea5e9;
-            background: rgba(14, 165, 233, 0.15);
-            box-shadow: 0 0 15px rgba(14, 165, 233, 0.4);
-            z-index: 10;
-        }
-
+        /* Overlay Labels: Compact & highly transparent so the gauge is visible beneath */
         .smart-label {
             position: absolute;
-            background: rgba(15, 23, 42, 0.85);
-            color: white;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
+            color: #ffffff;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'Inter', sans-serif;
             white-space: nowrap;
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            /* Minimal blur so metal & details of the gauge stay visible through the label */
+            backdrop-filter: blur(1.5px);
+            -webkit-backdrop-filter: blur(1.5px);
+            text-shadow: 0 1px 2px #000000, 0 0 3px #000000, 0 0 5px #000000;
             pointer-events: none;
-            transform: translate(-50%, -120%);
-            left: 50%;
-            top: 0;
-            z-index: 11;
+            z-index: 25;
             display: flex;
             align-items: center;
-            gap: 6px;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        
-        .smart-box.active .smart-label {
-            opacity: 1;
-        }
-        
-        .smart-box.idle-part .smart-label {
-            opacity: 0.6;
-            background: rgba(80, 60, 0, 0.6);
-            border-color: rgba(255, 204, 0, 0.2);
+            gap: 4px;
+            opacity: 1; /* Always show without hover */
+            transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
         }
 
-        .smart-box.idle-gauge .smart-label {
-            opacity: 0.5;
-            background: rgba(15, 23, 42, 0.4);
-            border-color: rgba(255, 255, 255, 0.1);
+        /* Pointer Arrow */
+        .smart-label::after {
+            content: '';
+            position: absolute;
+            border: 4px solid transparent;
+            pointer-events: none;
         }
-        
-        .focus-mode-on .smart-box.idle-gauge,
+
+        /* Placement Above: arrow at bottom pointing down */
+        .smart-label.placement-above::after,
+        .smart-label.placement-far-above::after {
+            top: 100%;
+            bottom: auto;
+            left: 50%;
+            right: auto;
+            transform: translateX(-50%);
+        }
+
+        /* Placement Below: arrow at top pointing up */
+        .smart-label.placement-below::after,
+        .smart-label.placement-far-below::after {
+            bottom: 100%;
+            top: auto;
+            left: 50%;
+            right: auto;
+            transform: translateX(-50%);
+        }
+
+        /* Placement Right: arrow at left pointing left */
+        .smart-label.placement-right::after,
+        .smart-label.placement-far-right::after {
+            right: 100%;
+            left: auto;
+            top: 50%;
+            bottom: auto;
+            transform: translateY(-50%);
+        }
+
+        /* Placement Left: arrow at right pointing right */
+        .smart-label.placement-left::after,
+        .smart-label.placement-far-left::after {
+            left: 100%;
+            right: auto;
+            top: 50%;
+            bottom: auto;
+            transform: translateY(-50%);
+        }
+
+        /* Placement Above-Right: arrow at bottom-left */
+        .smart-label.placement-above-right::after {
+            top: 100%;
+            bottom: auto;
+            left: 20%;
+            right: auto;
+        }
+
+        /* Placement Above-Left: arrow at bottom-right */
+        .smart-label.placement-above-left::after {
+            top: 100%;
+            bottom: auto;
+            right: 20%;
+            left: auto;
+        }
+
+        /* Placement Below-Right: arrow at top-left */
+        .smart-label.placement-below-right::after {
+            bottom: 100%;
+            top: auto;
+            left: 20%;
+            right: auto;
+        }
+
+        /* Placement Below-Left: arrow at top-right */
+        .smart-label.placement-below-left::after {
+            bottom: 100%;
+            top: auto;
+            right: 20%;
+            left: auto;
+        }
+
+        /* Not Checked gauge label: Grey Highly Transparent (0.30 opacity) */
+        .smart-box.gauge-unchecked .smart-label,
+        .smart-box.idle-gauge .smart-label {
+            background: rgba(15, 23, 42, 0.30);
+            border: 1px solid rgba(148, 163, 184, 0.60);
+            color: #f8fafc;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.30);
+        }
+
+        .smart-box.gauge-unchecked .smart-label.placement-above::after,
+        .smart-box.gauge-unchecked .smart-label.placement-above-right::after,
+        .smart-box.gauge-unchecked .smart-label.placement-above-left::after,
+        .smart-box.gauge-unchecked .smart-label.placement-far-above::after,
+        .smart-box.idle-gauge .smart-label.placement-above::after,
+        .smart-box.idle-gauge .smart-label.placement-above-right::after,
+        .smart-box.idle-gauge .smart-label.placement-above-left::after,
+        .smart-box.idle-gauge .smart-label.placement-far-above::after {
+            border-top-color: rgba(15, 23, 42, 0.40);
+        }
+
+        .smart-box.gauge-unchecked .smart-label.placement-below::after,
+        .smart-box.gauge-unchecked .smart-label.placement-below-right::after,
+        .smart-box.gauge-unchecked .smart-label.placement-below-left::after,
+        .smart-box.gauge-unchecked .smart-label.placement-far-below::after,
+        .smart-box.idle-gauge .smart-label.placement-below::after,
+        .smart-box.idle-gauge .smart-label.placement-below-right::after,
+        .smart-box.idle-gauge .smart-label.placement-below-left::after,
+        .smart-box.idle-gauge .smart-label.placement-far-below::after {
+            border-bottom-color: rgba(15, 23, 42, 0.40);
+        }
+
+        .smart-box.gauge-unchecked .smart-label.placement-right::after,
+        .smart-box.gauge-unchecked .smart-label.placement-far-right::after,
+        .smart-box.idle-gauge .smart-label.placement-right::after,
+        .smart-box.idle-gauge .smart-label.placement-far-right::after {
+            border-right-color: rgba(15, 23, 42, 0.40);
+        }
+
+        .smart-box.gauge-unchecked .smart-label.placement-left::after,
+        .smart-box.gauge-unchecked .smart-label.placement-far-left::after,
+        .smart-box.idle-gauge .smart-label.placement-left::after,
+        .smart-box.idle-gauge .smart-label.placement-far-left::after {
+            border-left-color: rgba(15, 23, 42, 0.40);
+        }
+
+        /* Checked gauge label: Green Highly Transparent (0.32 opacity) */
+        .smart-box.gauge-checked .smart-label {
+            background: rgba(20, 83, 45, 0.32);
+            border: 1px solid rgba(74, 222, 128, 0.85);
+            color: #ffffff;
+            box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+        }
+
+        .smart-box.gauge-checked .smart-label.placement-above::after,
+        .smart-box.gauge-checked .smart-label.placement-above-right::after,
+        .smart-box.gauge-checked .smart-label.placement-above-left::after,
+        .smart-box.gauge-checked .smart-label.placement-far-above::after {
+            border-top-color: rgba(20, 83, 45, 0.45);
+        }
+
+        .smart-box.gauge-checked .smart-label.placement-below::after,
+        .smart-box.gauge-checked .smart-label.placement-below-right::after,
+        .smart-box.gauge-checked .smart-label.placement-below-left::after,
+        .smart-box.gauge-checked .smart-label.placement-far-below::after {
+            border-bottom-color: rgba(20, 83, 45, 0.45);
+        }
+
+        .smart-box.gauge-checked .smart-label.placement-right::after,
+        .smart-box.gauge-checked .smart-label.placement-far-right::after {
+            border-right-color: rgba(20, 83, 45, 0.45);
+        }
+
+        .smart-box.gauge-checked .smart-label.placement-left::after,
+        .smart-box.gauge-checked .smart-label.placement-far-left::after {
+            border-left-color: rgba(20, 83, 45, 0.45);
+        }
+
+        /* Active / dwelling gauge label: Green Transparent (0.40 opacity) */
+        .smart-box.gauge-active .smart-label,
+        .smart-box.active .smart-label {
+            background: rgba(22, 101, 52, 0.40);
+            border: 1px solid rgba(74, 222, 128, 0.95);
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.35);
+        }
+
+        .smart-box.gauge-active .smart-label.placement-above::after,
+        .smart-box.gauge-active .smart-label.placement-above-right::after,
+        .smart-box.gauge-active .smart-label.placement-above-left::after,
+        .smart-box.gauge-active .smart-label.placement-far-above::after,
+        .smart-box.active .smart-label.placement-above::after,
+        .smart-box.active .smart-label.placement-above-right::after,
+        .smart-box.active .smart-label.placement-above-left::after,
+        .smart-box.active .smart-label.placement-far-above::after {
+            border-top-color: rgba(22, 101, 52, 0.50);
+        }
+
+        .smart-box.gauge-active .smart-label.placement-below::after,
+        .smart-box.gauge-active .smart-label.placement-below-right::after,
+        .smart-box.gauge-active .smart-label.placement-below-left::after,
+        .smart-box.gauge-active .smart-label.placement-far-below::after,
+        .smart-box.active .smart-label.placement-below::after,
+        .smart-box.active .smart-label.placement-below-right::after,
+        .smart-box.active .smart-label.placement-below-left::after,
+        .smart-box.active .smart-label.placement-far-below::after {
+            border-bottom-color: rgba(22, 101, 52, 0.50);
+        }
+
+        .smart-box.gauge-active .smart-label.placement-right::after,
+        .smart-box.gauge-active .smart-label.placement-far-right::after,
+        .smart-box.active .smart-label.placement-right::after,
+        .smart-box.active .smart-label.placement-far-right::after {
+            border-right-color: rgba(22, 101, 52, 0.50);
+        }
+
+        .smart-box.gauge-active .smart-label.placement-left::after,
+        .smart-box.gauge-active .smart-label.placement-far-left::after,
+        .smart-box.active .smart-label.placement-left::after,
+        .smart-box.active .smart-label.placement-far-left::after {
+            border-left-color: rgba(22, 101, 52, 0.50);
+        }
+
+        .focus-mode-on .smart-box.gauge-unchecked,
         .focus-mode-on .smart-box.idle-part {
             display: none !important;
         }
-        /* Profile Toggle Buttons */
-        .profile-toggle {
+.profile-toggle {
             display: flex;
             gap: 6px;
             width: 100%;
@@ -609,7 +815,7 @@
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label for="focus-mode-toggle" style="font-size: 0.8rem; color: #0ea5e9; font-weight: 700;">Focus Mode</label>
                         <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
-                            <input type="checkbox" id="focus-mode-toggle" onchange="toggleFocusMode()" checked
+                            <input type="checkbox" id="focus-mode-toggle" onchange="toggleFocusMode()"
                                 style="opacity: 0; width: 0; height: 0;">
                             <span class="slider round"
                                 style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;"></span>
@@ -672,7 +878,7 @@
             <div class="camera-container" style="display: flex; justify-content: center; align-items: center; height: 100%;">
                 <div style="position: relative; display: inline-block; width: 100%; max-width: 960px;">
                     <canvas id="video-canvas" width="960" height="540" style="display: block; width: 100%; height: auto;"></canvas>
-                    <div id="smart-overlay-container" class="focus-mode-on" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden;"></div>
+                    <div id="smart-overlay-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible;"></div>
                 </div>
                 <div class="camera-overlay" id="camera-overlay" style="display: none;">
                     <span class="overlay-text">No Feed Available</span>

@@ -217,7 +217,12 @@ async def lifespan(app: FastAPI):
             for g_conf in saved_settings["gauge_configs"]:
                 cp_id = g_conf.get("id")
                 if cp_id in tml_validator._checkpoint_configs:
-                    tml_validator._checkpoint_configs[cp_id]["method"] = g_conf.get("method", "near")
+                    method = g_conf.get("method", "near")
+                    if cp_id == 1:
+                        method = "fully_inside"
+                    elif cp_id == 3 and method == "fully_inside":
+                        method = "near"
+                    tml_validator._checkpoint_configs[cp_id]["method"] = method
                     if "overlap_threshold" in g_conf:
                         tml_validator._checkpoint_configs[cp_id]["overlap_threshold"] = g_conf["overlap_threshold"]
                     if "near_distance_threshold" in g_conf:
