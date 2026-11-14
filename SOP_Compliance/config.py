@@ -36,7 +36,7 @@ OVERLAP_THRESHOLD = 0.15
 NEAR_DISTANCE_THRESHOLD = 50
 IGNORE_LEFT_OF_X = 320
 OK_HOLD_FRAMES = 3
-OK_HOLD_SECONDS = 0.1
+OK_HOLD_SECONDS = 1.0
 
 # ─── Part-Presence State Machine ─────────────────────────────────────────────
 GAUGE_GRACE_FRAMES = 15
@@ -184,6 +184,15 @@ PROFILES = {
         },
 
         # SOP validation checkpoints
+        # In TML, 11mm, 13mm, and Dia gauges look similar to the model.
+        # Group confusion tracking ensures target-guided identification at In / Out / DS Thread,
+        # persistent track identity, and track mutual exclusion.
+        "gauge_confusion": {
+            "group": ["11mm", "13mm", "Dia"],
+            "pair": ["11mm", "13mm"],
+            "min_rest_distance": 50,
+        },
+
         "checkpoints": [
             {
                 "id": 1,
@@ -232,6 +241,8 @@ PROFILES = {
                 "gauge_class": "11mm",
                 "part_class": "Out",
                 "method": "near",
+                "near_distance_threshold": 60,
+                "require_movement": True,
                 "description": "11mm Gauge near Outlet",
             },
             {
@@ -240,6 +251,8 @@ PROFILES = {
                 "gauge_class": "13mm",
                 "part_class": "In",
                 "method": "near",
+                "near_distance_threshold": 60,
+                "require_movement": True,
                 "description": "13mm Gauge near Inlet",
             },
         ],
@@ -295,7 +308,7 @@ PROFILES = {
         # but only if it has moved away from its resting position.
         "gauge_confusion": {
             "pair": ["8mm", "11mm"],
-            "min_rest_distance": 30,   # px a gauge must move from rest to count
+            "min_rest_distance": 80,   # px a gauge must move from rest to count
         },
 
         # ── U-Gauge identity tracking ─────────────────────────────────────────
@@ -434,3 +447,22 @@ GAUGE_CHECKPOINTS = _TML["checkpoints"]
 
 # Default active profile
 DEFAULT_PROFILE = "TML"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DATABASE LOGGING (Microsoft SQL Server / MSSQL or MySQL)
+#  The SOP app logs every inspection result to the database.
+#  Supported DB_TYPE: "mssql" (Microsoft SQL Server) or "mysql"
+#
+#  Set DB_ENABLED = False to disable database logging entirely.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DB_ENABLED  = True
+DB_TYPE     = "mssql"           # "mssql" for Microsoft SQL Server, "mysql" for MySQL
+DB_HOST     = "localhost\\SQLEXPRESS"       # Server host (e.g. "localhost", "127.0.0.1", or IT Server IP)
+DB_PORT     = 1433              # MSSQL default port is 1433 (MySQL is 3306)
+DB_USER     = ""        # Database username (or Windows Auth if empty)
+DB_PASSWORD = ""        # Database password
+DB_NAME     = "firewall_sop"    # Database name
+DB_TABLE    = "inspection_logs" # Table name
+DB_DRIVER   = "ODBC Driver 17 for SQL Server"  # ODBC driver for MSSQL ("SQL Server" or "ODBC Driver 17 for SQL Server")

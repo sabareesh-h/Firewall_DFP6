@@ -3,6 +3,19 @@ setlocal
 title SOP Compliance System
 cd /d "%~dp0"
 
+:: 0. Auto-install Visual C++ Runtime if missing on a fresh PC
+if not exist "%SystemRoot%\System32\vcruntime140_1.dll" (
+    if exist "%~dp0vc_redist.x64.exe" (
+        echo ======================================================================
+        echo  First-Time Setup: Installing Microsoft Visual C++ Runtime...
+        echo ======================================================================
+        start /wait "" "%~dp0vc_redist.x64.exe" /install /passive /norestart
+        echo  Visual C++ Runtime installed successfully.
+        echo ======================================================================
+        echo.
+    )
+)
+
 :: 1. Check virtual environment
 if not exist "venv\Scripts\activate.bat" (
     echo ======================================================================

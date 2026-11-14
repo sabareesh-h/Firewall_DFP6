@@ -22,11 +22,23 @@ KEY DESIGN PRINCIPLE:
 """
 
 import logging
+import sys
+import os
 import time
 from enum import Enum
 from typing import List, Dict, Any, Optional, Tuple, Set
 from dataclasses import dataclass
 from datetime import datetime
+
+# ── Database logger (optional — imported lazily so gauge_validator works
+#    even if pymysql is not installed yet) ────────────────────────────────────
+try:
+    # SOP_Compliance/ is on sys.path when app.py runs, so db_logger is found
+    import db_logger as _db_logger
+    _DB_LOGGER_AVAILABLE = True
+except ImportError:
+    _db_logger = None           # type: ignore[assignment]
+    _DB_LOGGER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +182,7 @@ class UGaugeIdentityTracker:
         )
         self.stable_px = float(
             stable_px if stable_px is not None else self.STABLE_PX
-        )
+        ) 
         self.learning_max_spread = float(
             learning_max_spread if learning_max_spread is not None
             else self.LEARNING_MAX_SPREAD_PX
@@ -555,6 +567,44 @@ class UGaugeIdentityTracker:
 
         positions = [self._center(d["bbox"]) for d in dets]
 
+        # ── [FIX 4] Pre-detect gauge pickup before greedy matching begins ─────
+        # If exactly one named track that was at its own slot last frame now has
+        # no detection near that slot, the operator has just picked that gauge
+        # up.  Declaring _active_rank here — before _match_pass runs — means
+        # _match_allowed immediately locks the other three gauges to their own
+        # slot radii via the existing "if self._active_rank is not None: return
+        # False" guard, closing the 1-3 frame identity-swap window entirely.
+        # NOTE: Does not use the Hand class; purely geometry-based.
+        if self._slots_established and self._active_rank is None:
+            own_r = self._own_slot_radius()
+            suddenly_empty: List[int] = []
+            for _trk in self._tracks:
+                _r = _trk.get("rank")
+                if _r is None or _trk.get("misses", 0) > 0:
+                    continue
+                _slot = self._slots[_r] if _r < len(self._slots) else None
+                if _slot is None:
+                    continue
+                # Was this track confirmed resting at its slot last frame?
+                if self._dist(_trk["pos"], tuple(_slot["pos"])) > self.stable_px * self.scale:
+                    continue
+                # Is there any new detection near that slot right now?
+                slot_still_covered = any(
+                    self._dist(_p, tuple(_slot["pos"])) <= own_r
+                    for _p in positions
+                )
+                if not slot_still_covered:
+                    suddenly_empty.append(_r)
+            if len(suddenly_empty) == 1:
+                self._active_rank = suddenly_empty[0]
+                self._active_since = time.monotonic()
+                logger.info(
+                    "[UGaugeTracker] FIX4: Pre-detected pickup of rank-%d "
+                    "(slot suddenly empty).",
+                    suddenly_empty[0],
+                )
+        # ─────────────────────────────────────────────────────────────────────
+
         # Which rack slots have a box on them this frame?  A gauge may only
         # leave the rack from an empty slot, which is what tells the gauge at
         # the part apart from its neighbours.
@@ -777,6 +827,16 @@ class UGaugeIdentityTracker:
             # Fast pickups that appear at a hole must be identified by rack slot vacancy memory.
             if self._point_near_check_area(pos, self._check_areas):
                 return False
+            # [FIX 2] A confirmed-still resting gauge is locked to its own slot
+            # radius.  This prevents a fast pickup of an adjacent gauge from
+            # stealing this track's identity through the greedy nearest-match.
+            # If THIS gauge is the one being picked up, Fix 4 will have already
+            # set _active_rank = this rank above, so the early "if rank ==
+            # self._active_rank: return True" guard fires first — Fix 2 never
+            # blocks the gauge that is actually being lifted.
+            # NOTE: Does not use the Hand class; purely position-based.
+            if self._track_is_still(track):
+                return False
             return (
                 rank not in self._occupied_slots
                 and not self._near_other_slot(pos, rank)
@@ -959,6 +1019,39 @@ class UGaugeIdentityTracker:
     def _remember_positions(self, positions: List[Tuple[float, float]]) -> None:
         self._last_u_positions = list(positions)
 
+    def _match_positions_to_reference(
+        self,
+        positions: List[Tuple[float, float]],
+        reference: List[Tuple[float, float]],
+    ) -> List[Tuple[float, float]]:
+        """
+        [FIX 1 helper] Re-order ``positions`` so that index i corresponds to the
+        same physical gauge as ``reference[i]``.
+
+        Uses greedy nearest-neighbour matching (smallest distance first) to keep
+        the rank-to-position mapping stable across frames even when YOLO outputs
+        the same four gauges in a different order because two of them share
+        almost the same Y-coordinate.
+        """
+        matched: List[Optional[Tuple[float, float]]] = [None] * len(reference)
+        used: Set[int] = set()
+        pairs: List[Tuple[float, int, int]] = sorted(
+            (self._dist(reference[ri], positions[pi]), ri, pi)
+            for ri in range(len(reference))
+            for pi in range(len(positions))
+        )
+        for _, ri, pi in pairs:
+            if matched[ri] is not None or pi in used:
+                continue
+            matched[ri] = positions[pi]
+            used.add(pi)
+        # Safety fill: cover unmatched slots with leftover positions.
+        remaining = [p for i, p in enumerate(positions) if i not in used]
+        for i in range(len(matched)):
+            if matched[i] is None and remaining:
+                matched[i] = remaining.pop(0)
+        return matched  # type: ignore[return-value]
+
     def _merge_duplicate_tracks(self) -> None:
         """
         Drop a track that sits on top of another one.
@@ -1057,13 +1150,23 @@ class UGaugeIdentityTracker:
 
         if self._learn_history:
             prev = self._learn_history[-1]
+            # [FIX 1] Stabilise position order across frames before comparing.
+            # Two adjacent gauges with nearly the same Y-coordinate can swap
+            # their detection index between frames within the 20 px stability
+            # window, silently mixing their rank averages.  Matching by nearest
+            # position (instead of trusting the Y-sort index) makes the
+            # accumulated history consistent regardless of YOLO's output order.
+            stable_pos = self._match_positions_to_reference(positions, prev)
             max_move = max(
-                self._dist(positions[i], prev[i]) for i in range(4)
+                self._dist(stable_pos[i], prev[i]) for i in range(4)
             )
             if max_move > self.stable_px * self.scale:
                 self._learn_history = []
+                stable_pos = list(positions)   # fresh start; Y-sort is fine
+        else:
+            stable_pos = list(positions)   # first frame: Y-sort is the reference
 
-        self._learn_history.append(positions)
+        self._learn_history.append(stable_pos)
         if len(self._learn_history) > self.min_stable_frames:
             self._learn_history.pop(0)
 
@@ -1468,6 +1571,34 @@ class UGaugeIdentityTracker:
             if not (0.5 * slot_gap <= gap <= 1.6 * slot_gap):
                 return
 
+        # [FIX 3] Before wiping all ranks and re-assigning by Y-sort, count how
+        # many ranks would actually change.  If more than ONE rank would change,
+        # the Y-sort result is suspicious: a gauge returned a few pixels off its
+        # normal spot can flip the sort order of two adjacent gauges and silently
+        # rename all four.  In that case we skip the rank wipe and only update
+        # slot positions gently.  Zero or one change is a legitimate slot drift
+        # correction and is allowed through normally.
+        proposed_rank = {track["id"]: new_r for new_r, track in enumerate(ordered)}
+        rank_changes = sum(
+            1 for track in ordered
+            if track.get("rank") != proposed_rank[track["id"]]
+        )
+        if rank_changes > 1:
+            logger.warning(
+                "[UGaugeTracker] FIX3: _refresh_slots would change %d rank(s) — "
+                "skipping rank wipe to prevent identity swap. "
+                "Updating slot positions only.",
+                rank_changes,
+            )
+            for new_r, track in enumerate(ordered):
+                slot = self._slots[new_r]
+                if slot is None:
+                    continue
+                sx, sy = slot["pos"]
+                nx, ny = track["pos"]
+                slot["pos"] = (sx + (nx - sx) * 0.3, sy + (ny - sy) * 0.3)
+            return
+
         # The four visible, still gauges are the four slots, top to bottom.
         # Every gauge is back on the rack, so nothing is in use any more.
         self._active_rank = None
@@ -1630,11 +1761,15 @@ class GaugeValidator:
         self._resting_positions: Dict[str, Tuple[float, float]] = {}
         self._gauge_history: Dict[str, List[Tuple[float, float]]] = {}
 
-        # Config-driven gauge confusion (HMI: 8mm / 11mm).  When absent, the
-        # legacy TML 13mm/11mm block in validate() is used unchanged.
+        # Config-driven gauge confusion (HMI: 8mm / 11mm, TML: 11mm / 13mm / Dia).
         self.gauge_confusion: Dict[str, Any] = gauge_confusion or {}
         self._min_rest_distance = float(
             self.gauge_confusion.get("min_rest_distance", 30)
+        )
+        self._confused_classes: Set[str] = set(
+            self.gauge_confusion.get("group")
+            or self.gauge_confusion.get("pair")
+            or []
         )
 
         # Physical-gauge tracks.  Keyed by position, not by class label, so
@@ -1645,6 +1780,8 @@ class GaugeValidator:
         self._movement_tracks: List[Dict[str, Any]] = []
         self._det_track: Dict[int, Dict[str, Any]] = {}
         self._frame_index = 0
+        self._checkpoint_latched_track: Dict[int, int] = {}
+        self._next_movement_track_id: int = 1
 
         # Resting spots learned during the session (HMI movement rule).
         # Stored as (raw_class_name, x, y).
@@ -1796,12 +1933,12 @@ class GaugeValidator:
 
         # ── Step 2: Track physical gauges (position-based, label-agnostic) ─
         if self._track_movement:
-            self._update_movement_tracks(gauge_detections)
+            self._update_movement_tracks(gauge_detections, part_detections)
             self._update_rest_spots(gauge_detections, part_detections)
 
         # ── Step 3: Gauge-confusion correction ───────────────────────────
         if self.gauge_confusion:
-            self._resolve_gauge_confusion(gauge_detections)
+            self._resolve_gauge_confusion(gauge_detections, part_detections)
         else:
             # Legacy TML 13mm / 11mm handling — unchanged.
             # If YOLO detects multiple 13mm gauges, the high-confidence one on the table is the real 13mm.
@@ -1872,7 +2009,11 @@ class GaugeValidator:
 
     # ─── Gauge Confusion & Physical Tracking ─────────────────────────────
 
-    def _update_movement_tracks(self, gauge_detections: Dict[str, List[Dict]]) -> None:
+    def _update_movement_tracks(
+        self,
+        gauge_detections: Dict[str, List[Dict]],
+        part_detections: Optional[Dict[str, List[Dict]]] = None,
+    ) -> None:
         """
         Follow each physical gauge by position, independent of its class label.
 
@@ -1894,46 +2035,55 @@ class GaugeValidator:
         dets.sort(key=lambda d: d.get("confidence", 0.0), reverse=True)
 
         used_tracks: Set[int] = set()
-        for det in dets:
+        matched_dets: Dict[int, int] = {}  # det_idx -> track_idx
+
+        # ── Phase 1: Match closest pairs within _TRACK_MATCH_DISTANCE ────────
+        pairs = []
+        for det_idx, det in enumerate(dets):
             cx, cy = self._center(det["bbox"])
             cls_name = det["class_name"]
-
-            # 1) Prefer the nearest unmatched track (normal, small movement).
-            best_idx: Optional[int] = None
-            best_dist: Optional[float] = None
-            for idx, track in enumerate(self._movement_tracks):
-                if idx in used_tracks:
+            for track_idx, track in enumerate(self._movement_tracks):
+                if track.get("locked_class") and track["locked_class"] != cls_name and track["locked_class"] in self._confused_classes:
                     continue
                 tx, ty = track["pos"]
                 dist = ((cx - tx) ** 2 + (cy - ty) ** 2) ** 0.5
-                if dist <= self._TRACK_MATCH_DISTANCE and (
-                    best_dist is None or dist < best_dist
-                ):
-                    best_idx, best_dist = idx, dist
+                if dist <= self._TRACK_MATCH_DISTANCE:
+                    pairs.append((dist, det_idx, track_idx))
 
-            # 2) Fall back to the most recent unmatched track with the same
-            #    label.  Operators can lift a gauge much further than one
-            #    frame's match distance; without this the gauge would get a
-            #    brand-new track whose "rest" is the check position itself.
-            if best_idx is None:
-                same_cls = [
-                    i for i, t in enumerate(self._movement_tracks)
-                    if i not in used_tracks and t.get("last_class") == cls_name
-                ]
-                if same_cls:
-                    best_idx = max(
-                        same_cls,
-                        key=lambda i: self._movement_tracks[i]["last_seen"],
-                    )
+        pairs.sort(key=lambda p: p[0])
+        for dist, det_idx, track_idx in pairs:
+            if det_idx not in matched_dets and track_idx not in used_tracks:
+                matched_dets[det_idx] = track_idx
+                used_tracks.add(track_idx)
 
-            # 3) For an 8mm/11mm confusion frame, the extra box belongs to the
-            #    other gauge in the pair.  Match it to that physical track
-            #    (nearest one) so its original resting spot is preserved.
-            if best_idx is None and self.gauge_confusion:
-                pair = set(self.gauge_confusion.get("pair", []))
+        # ── Phase 2: Fallback for unmatched detections (lifts, fast moves, confusion) ──
+        for det_idx, det in enumerate(dets):
+            if det_idx in matched_dets:
+                continue
+            cx, cy = self._center(det["bbox"])
+            cls_name = det["class_name"]
+
+            # Fall back to most recent unmatched track with same label or locked class
+            same_cls = [
+                i for i, t in enumerate(self._movement_tracks)
+                if i not in used_tracks and (
+                    t.get("locked_class") == cls_name or t.get("last_class") == cls_name
+                )
+            ]
+            best_idx = None
+            if same_cls:
+                best_idx = max(
+                    same_cls,
+                    key=lambda i: self._movement_tracks[i]["last_seen"],
+                )
+
+            # Confusion frame: match to nearest track in confused group
+            if best_idx is None and self._confused_classes:
                 candidates = [
                     i for i, t in enumerate(self._movement_tracks)
-                    if i not in used_tracks and t.get("last_class") in pair
+                    if i not in used_tracks and (
+                        t.get("last_class") in self._confused_classes or t.get("locked_class") in self._confused_classes
+                    )
                 ]
                 if candidates:
                     def _dist(i):
@@ -1942,28 +2092,37 @@ class GaugeValidator:
                     best_idx = min(candidates, key=_dist)
 
             if best_idx is None:
-                # New physical gauge — remember only where it was seen; the
-                # resting spot itself is learned from stable frames below.
+                # Brand new track
                 track = {
+                    "id": self._next_movement_track_id,
                     "pos": (cx, cy),
                     "first_pos": (cx, cy),
+                    "first_pos_at_target": self._detection_is_at_check_area(det, part_detections or {}),
                     "history": [(cx, cy)],
                     "last_class": cls_name,
+                    "locked_class": None,
                     "last_seen": self._frame_index,
                 }
+                self._next_movement_track_id += 1
                 self._movement_tracks.append(track)
                 best_idx = len(self._movement_tracks) - 1
-            else:
-                track = self._movement_tracks[best_idx]
-                track["pos"] = (cx, cy)
-                track["history"].append((cx, cy))
-                if len(track["history"]) > self._REST_HISTORY_FRAMES:
-                    track["history"].pop(0)
-                track["last_class"] = cls_name
-                track["last_seen"] = self._frame_index
 
+            matched_dets[det_idx] = best_idx
             used_tracks.add(best_idx)
-            self._det_track[id(det)] = self._movement_tracks[best_idx]
+
+        # ── Update track positions & det_track map ───────────────────────────
+        for det_idx, det in enumerate(dets):
+            cx, cy = self._center(det["bbox"])
+            cls_name = det["class_name"]
+            track_idx = matched_dets[det_idx]
+            track = self._movement_tracks[track_idx]
+            track["pos"] = (cx, cy)
+            track["history"].append((cx, cy))
+            if len(track["history"]) > self._REST_HISTORY_FRAMES:
+                track["history"].pop(0)
+            track["last_class"] = cls_name
+            track["last_seen"] = self._frame_index
+            self._det_track[id(det)] = track
 
     def _track_is_stable(self, track: Dict[str, Any]) -> bool:
         """True when the gauge has barely moved over the last few frames."""
@@ -2180,10 +2339,12 @@ class GaugeValidator:
             if visited_dists:
                 return min(visited_dists)
 
-        # Last resort: distance from where this physical gauge was first seen.
+        # Last resort: distance from where this physical gauge was first seen,
+        # unless it was first observed already at a check area.
         if track is not None and track.get("first_pos") is not None:
-            fx, fy = track["first_pos"]
-            return ((pos[0] - fx) ** 2 + (pos[1] - fy) ** 2) ** 0.5
+            if not track.get("first_pos_at_target", False):
+                fx, fy = track["first_pos"]
+                return ((pos[0] - fx) ** 2 + (pos[1] - fy) ** 2) ** 0.5
 
         return None
 
@@ -2199,68 +2360,312 @@ class GaugeValidator:
             return True
         return dist >= self._min_rest_distance
 
-    def _resolve_gauge_confusion(
-        self, gauge_detections: Dict[str, List[Dict]]
+    def _resolve_tml_gauge_confusion(
+        self,
+        gauge_detections: Dict[str, List[Dict[str, Any]]],
+        part_detections: Dict[str, List[Dict[str, Any]]],
     ) -> None:
         """
-        HMI rule: when the same frame has two boxes with the same label, keep
-        the higher-confidence box as that gauge.  The lower-confidence box is
-        the other gauge (8mm <-> 11mm) ONLY if it has moved away from rest;
-        otherwise it is treated as a duplicate / false detection and dropped.
-
-        At most one detection per class survives this step.
+        TML disambiguation and validation for 11mm, 13mm, and Dia gauges:
+        1. Confused Group: {"11mm", "13mm", "Dia"}
+        2. Deduplication: Gauge bounding boxes practically on top of each other (<25px)
+           are deduplicated, keeping the highest confidence detection.
+        3. Target-Guided Identification:
+           - Detection near Outlet ("Out") -> definitively 11mm Gauge (class_id=14)
+           - Detection near Inlet ("In") -> definitively 13mm Gauge (class_id=5)
+           - Detection near "DS Thread" -> definitively Dia Gauge (class_id=2)
+           Locks the detection class, display name, class_id, and track's locked_class.
+        4. Resting / Unassigned Gauges:
+           - Resting detections retain their track's locked_class (if set) or YOLO class.
+           - If multiple resting detections collide on the same label, unused classes
+             from the confused group are assigned to ensure distinct identities.
+        5. At most one detection per class is retained in gauge_detections.
         """
+        group = list(self.gauge_confusion.get("group", ["11mm", "13mm", "Dia"]))
+        class_info = {
+            "11mm": {"id": 14, "display": "11mm Gauge"},
+            "13mm": {"id": 5, "display": "13mm Gauge"},
+            "Dia": {"id": 2, "display": "Dia Gauge"},
+        }
+
+        all_group_dets: List[Dict[str, Any]] = []
+        for name in group:
+            for det in gauge_detections.get(name, []):
+                all_group_dets.append(det)
+
+        if not all_group_dets:
+            return
+
+        deduped: List[Dict[str, Any]] = []
+        for det in sorted(
+            all_group_dets, key=lambda d: d.get("confidence", 0.0), reverse=True
+        ):
+            pos = self._center(det["bbox"])
+            if not any(
+                self._dist(pos, self._center(k["bbox"])) < 25.0
+                for k in deduped
+            ):
+                deduped.append(det)
+
+        target_info = [
+            ("Out", "11mm", 60.0),
+            ("In", "13mm", 60.0),
+            ("DS Thread", "Dia", 180.0),
+        ]
+
+        part_bboxes: Dict[str, List[int]] = {}
+        for part_name, _, _ in target_info:
+            bbox = None
+            if part_name in part_detections and part_detections[part_name]:
+                bbox = max(part_detections[part_name], key=lambda d: d.get("confidence", 0.0))["bbox"]
+            elif part_name in self._last_known_parts:
+                bbox = self._last_known_parts[part_name]
+            elif part_name in self._part_area_memory:
+                bbox = self._part_area_memory[part_name]
+            if bbox is not None:
+                part_bboxes[part_name] = bbox
+
+        def _is_at_target(det_bbox: List[int], tgt_bbox: List[int], thresh: float) -> bool:
+            valid, _ = self._evaluate_spatial(
+                det_bbox, tgt_bbox, "near", near_distance_threshold=thresh
+            )
+            if not valid and self.calculate_iou(det_bbox, tgt_bbox) > 0.0:
+                valid = True
+            return valid
+
+        candidate_matches = []
+        for det in deduped:
+            for part_name, gauge_class, thresh in target_info:
+                if part_name in part_bboxes:
+                    tb = part_bboxes[part_name]
+                    if _is_at_target(det["bbox"], tb, thresh):
+                        dist = self._dist(self._center(det["bbox"]), self._center(tb))
+                        candidate_matches.append((dist, det, gauge_class))
+
+        candidate_matches.sort(key=lambda m: m[0])
+
+        assigned_dets: Dict[int, str] = {}
+        assigned_targets: Set[str] = set()
+
+        for dist, det, gauge_class in candidate_matches:
+            if id(det) not in assigned_dets and gauge_class not in assigned_targets:
+                assigned_dets[id(det)] = gauge_class
+                assigned_targets.add(gauge_class)
+                det["class_name"] = gauge_class
+                info = class_info.get(gauge_class, {"id": 0, "display": f"{gauge_class} Gauge"})
+                det["class_id"] = info["id"]
+                det["display_name"] = info["display"]
+                track = self._det_track.get(id(det))
+                if track:
+                    track["locked_class"] = gauge_class
+                    track["last_class"] = gauge_class
+
+        unassigned_dets = [d for d in deduped if id(d) not in assigned_dets]
+        for det in unassigned_dets:
+            track = self._det_track.get(id(det))
+            locked = track.get("locked_class") if track else None
+            yolo_cls = det.get("class_name")
+
+            if locked in group and locked not in assigned_targets:
+                chosen_cls = locked
+            elif yolo_cls in group and yolo_cls not in assigned_targets:
+                chosen_cls = yolo_cls
+            else:
+                remaining = [c for c in group if c not in assigned_targets]
+                if remaining:
+                    chosen_cls = remaining[0]
+                else:
+                    chosen_cls = yolo_cls if yolo_cls in group else "11mm"
+
+            assigned_dets[id(det)] = chosen_cls
+            assigned_targets.add(chosen_cls)
+            info = class_info.get(chosen_cls, {"id": 0, "display": f"{chosen_cls} Gauge"})
+            det["class_name"] = chosen_cls
+            det["class_id"] = info["id"]
+            det["display_name"] = info["display"]
+            if track and not track.get("locked_class"):
+                track["locked_class"] = chosen_cls
+                track["last_class"] = chosen_cls
+
+        for c in group:
+            gauge_detections.pop(c, None)
+
+        by_class: Dict[str, Dict[str, Any]] = {}
+        for det in deduped:
+            c = det["class_name"]
+            if c in group:
+                if c not in by_class or det.get("confidence", 0.0) > by_class[c].get("confidence", 0.0):
+                    by_class[c] = det
+
+        for c, det in by_class.items():
+            gauge_detections[c] = [det]
+
+    def _resolve_gauge_confusion(
+        self,
+        gauge_detections: Dict[str, List[Dict]],
+        part_detections: Optional[Dict[str, List[Dict]]] = None,
+    ) -> None:
+        """
+        HMI rule for 8mm / 11mm pin gauges:
+        1. Sticky Identity: If a track already has an established locked_class
+           (from rest), it keeps that identity even if YOLO flickers.
+        2. Resting Disambiguation: When both gauges are resting on the table,
+           they are labeled distinctly (top/left = 8mm, bottom/right = 11mm).
+           Neither is dropped from the display.
+        3. Single-gauge away handling: When one gauge is taken to the part,
+           it maintains its origin identity and does NOT get arbitrarily flipped.
+        4. Mutual Exclusion: At most one detection per class survives.
+        """
+        if "group" in self.gauge_confusion:
+            self._resolve_tml_gauge_confusion(gauge_detections, part_detections or {})
+            return
         pair = list(self.gauge_confusion.get("pair", []))
         if len(pair) != 2:
             logger.warning(f"Invalid gauge_confusion pair: {pair}")
             return
 
-        a, b = pair
+        a, b = pair  # ["8mm", "11mm"]
 
-        # Work from a snapshot so a box relabelled in one pass is not
-        # immediately processed again by the other pass.
-        snapshot = {name: list(dets) for name, dets in gauge_detections.items()}
-        lists: Dict[str, List[Dict]] = {
-            a: list(snapshot.get(a, [])),
-            b: list(snapshot.get(b, [])),
-        }
+        # Collect all detections belonging to the pair
+        all_pair_dets: List[Dict[str, Any]] = []
+        for name in (a, b):
+            for det in gauge_detections.get(name, []):
+                all_pair_dets.append(det)
 
-        for cls, other in ((a, b), (b, a)):
-            dets = lists[cls]
-            if len(dets) <= 1:
-                lists[cls] = dets[:1]
-                continue
+        if not all_pair_dets:
+            return
 
-            dets.sort(key=lambda d: d.get("confidence", 0.0), reverse=True)
-            kept = [dets[0]]
-            other_present = bool(lists[other])
+        # Deduplicate detections that are practically on top of each other (< 25px)
+        deduped: List[Dict[str, Any]] = []
+        for det in sorted(
+            all_pair_dets, key=lambda d: d.get("confidence", 0.0), reverse=True
+        ):
+            pos = self._center(det["bbox"])
+            if not any(
+                ((pos[0] - self._center(k["bbox"])[0]) ** 2 + (pos[1] - self._center(k["bbox"])[1]) ** 2) ** 0.5 < 25.0
+                for k in deduped
+            ):
+                deduped.append(det)
+        all_pair_dets = deduped
 
-            for det in dets[1:]:
-                # Two boxes on the same physical object are a duplicate, never
-                # a second gauge.  A real second gauge sits in a different area.
-                kx, ky = self._center(kept[0]["bbox"])
-                dx, dy = self._center(det["bbox"])
-                same_object = ((dx - kx) ** 2 + (dy - ky) ** 2) ** 0.5 < self._min_rest_distance
+        # If exactly two distinct gauges are present in the pair:
+        if len(all_pair_dets) == 2:
+            d1, d2 = all_pair_dets[0], all_pair_dets[1]
+            t1 = self._det_track.get(id(d1))
+            t2 = self._det_track.get(id(d2))
 
-                if (
-                    not same_object
-                    and not other_present
-                    and self._detection_is_away_from_rest(det)
-                ):
-                    det["class_name"] = other
-                    lists[other] = [det]
-                    other_present = True
+            # Case A: If both already have locked classes that are different, apply them!
+            if (
+                t1 and t2
+                and t1.get("locked_class") in (a, b)
+                and t2.get("locked_class") in (a, b)
+                and t1["locked_class"] != t2["locked_class"]
+            ):
+                d1_cls = t1["locked_class"]
+                d2_cls = t2["locked_class"]
+            # Case B: If one is locked and the other is not, the other gets the remaining class
+            elif t1 and t1.get("locked_class") in (a, b):
+                d1_cls = t1["locked_class"]
+                d2_cls = b if d1_cls == a else a
+                if t2:
+                    t2["locked_class"] = d2_cls
+            elif t2 and t2.get("locked_class") in (a, b):
+                d2_cls = t2["locked_class"]
+                d1_cls = b if d2_cls == a else a
+                if t1:
+                    t1["locked_class"] = d1_cls
+            else:
+                # Case C: Neither has locked class yet.
+                away1 = self._detection_is_away_from_rest(d1)
+                away2 = self._detection_is_away_from_rest(d2)
+                if away1 and not away2:
+                    d1_cls = d1["class_name"] if d1["class_name"] in (a, b) else a
+                    d2_cls = b if d1_cls == a else a
+                elif away2 and not away1:
+                    d2_cls = d2["class_name"] if d2["class_name"] in (a, b) else b
+                    d1_cls = a if d2_cls == b else b
                 else:
-                    logger.debug(
-                        f"[Gauge confusion] Dropped extra '{cls}' "
-                        f"(conf={det.get('confidence', 0.0):.2f})"
-                    )
+                    # Both are resting on the table!
+                    if (
+                        d1["class_name"] != d2["class_name"]
+                        and d1["class_name"] in (a, b)
+                        and d2["class_name"] in (a, b)
+                    ):
+                        d1_cls = d1["class_name"]
+                        d2_cls = d2["class_name"]
+                    else:
+                        # YOLO gave them the same class (e.g. both 8mm or both 11mm).
+                        # Separate by fixture coordinates:
+                        # Upper (smaller Y) or Left (smaller X) is 8mm, lower/right is 11mm.
+                        pos1 = self._center(d1["bbox"])
+                        pos2 = self._center(d2["bbox"])
+                        dy = pos2[1] - pos1[1]
+                        dx = pos2[0] - pos1[0]
+                        if abs(dy) > 20.0:
+                            if dy > 0:
+                                d1_cls, d2_cls = a, b
+                            else:
+                                d1_cls, d2_cls = b, a
+                        else:
+                            if dx > 0:
+                                d1_cls, d2_cls = a, b
+                            else:
+                                d1_cls, d2_cls = b, a
 
-            lists[cls] = kept
+                if t1:
+                    t1["locked_class"] = d1_cls
+                if t2:
+                    t2["locked_class"] = d2_cls
+
+            d1["class_name"] = d1_cls
+            d1["display_name"] = f"{d1_cls} Gauge"
+            d1["class_id"] = 1 if d1_cls == "8mm" else 0
+
+            d2["class_name"] = d2_cls
+            d2["display_name"] = f"{d2_cls} Gauge"
+            d2["class_id"] = 1 if d2_cls == "8mm" else 0
+
+            gauge_detections[a] = [d1 if d1_cls == a else d2]
+            gauge_detections[b] = [d2 if d2_cls == b else d1]
+            return
+
+        # If exactly one gauge in the pair is detected:
+        if len(all_pair_dets) == 1:
+            det = all_pair_dets[0]
+            track = self._det_track.get(id(det))
+            if track and track.get("locked_class") in (a, b):
+                assigned_cls = track["locked_class"]
+            else:
+                assigned_cls = det["class_name"] if det["class_name"] in (a, b) else a
+                if track:
+                    track["locked_class"] = assigned_cls
+
+            det["class_name"] = assigned_cls
+            det["display_name"] = f"{assigned_cls} Gauge"
+            det["class_id"] = 1 if assigned_cls == "8mm" else 0
+
+            gauge_detections[assigned_cls] = [det]
+            other = b if assigned_cls == a else a
+            gauge_detections.pop(other, None)
+            return
+
+        # More than 2 detections: keep the best one per class
+        by_cls: Dict[str, Dict[str, Any]] = {}
+        for det in all_pair_dets:
+            track = self._det_track.get(id(det))
+            cls = track.get("locked_class") if track and track.get("locked_class") in (a, b) else det["class_name"]
+            if cls not in (a, b):
+                cls = a
+            if cls not in by_cls or det.get("confidence", 0.0) > by_cls[cls].get("confidence", 0.0):
+                by_cls[cls] = det
 
         for name in (a, b):
-            if lists.get(name):
-                gauge_detections[name] = lists[name]
+            if name in by_cls:
+                d = by_cls[name]
+                d["class_name"] = name
+                d["display_name"] = f"{name} Gauge"
+                d["class_id"] = 1 if name == "8mm" else 0
+                gauge_detections[name] = [d]
             else:
                 gauge_detections.pop(name, None)
 
@@ -2492,6 +2897,11 @@ class GaugeValidator:
                         gauge["bbox"], part_bbox, method,
                         overlap_thresh, near_thresh,
                     )
+                    if not valid_for_area and method == "near":
+                        # Fallback for "near" method: if bounding boxes overlap/intersect, the gauge is at the hole
+                        iou = self.calculate_iou(gauge["bbox"], part_bbox)
+                        if iou > 0.0:
+                            valid_for_area = True
                     if valid_for_area:
                         is_valid = True
                         matched_gauge = gauge
@@ -2509,12 +2919,14 @@ class GaugeValidator:
                 if config.get("require_movement"):
                     curr_pos = self._center(best_gauge["bbox"])
 
-                    # 8mm and 11mm share rest information because the model
-                    # may swap their labels.  Other gauges use their own rest.
-                    pair = set(self.gauge_confusion.get("pair", []))
+                    # 8mm and 11mm (HMI) or 11mm, 13mm, Dia (TML) share rest information
+                    # because the model may swap their labels.  Other gauges use their own rest.
+                    confused = set(
+                        self.gauge_confusion.get("group") or self.gauge_confusion.get("pair") or []
+                    )
                     rest_classes = (
-                        {gauge_class} | pair
-                        if gauge_class in pair
+                        {gauge_class} | confused
+                        if gauge_class in confused
                         else {gauge_class}
                     )
                     track = self._det_track.get(id(best_gauge))
@@ -2528,6 +2940,7 @@ class GaugeValidator:
                     # app restart.  In that case the spatial check is the only
                     # available evidence; once a rest spot has been observed,
                     # the normal movement rule applies.
+                    still_at_rest = False
                     own_rest = self._nearest_rest_spot(curr_pos, {gauge_class})
                     no_reference = own_rest is None and config.get("persist_rest")
                     if (
@@ -2536,7 +2949,8 @@ class GaugeValidator:
                         and dist_to_rest < self._min_rest_distance
                     ):
                         is_valid = False   # still at rest — not used yet
-            elif gauge_class in ["11mm", "13mm"]:
+                        still_at_rest = True
+            elif gauge_class in ["11mm", "13mm"] and not config.get("require_movement"):
                 # Legacy TML movement check — unchanged.
                 curr_pos = self._center(best_gauge["bbox"])
 
@@ -2567,6 +2981,24 @@ class GaugeValidator:
             result.confidence = best_gauge["confidence"]
             result.overlap = overlap
 
+            # ── Checkpoint Track Mutual Exclusion for Confused Gauges ─────
+            # A physical gauge track that was already used to latch one checkpoint in a
+            # confused set (e.g. 8mm/11mm in HMI or 11mm/13mm/Dia in TML)
+            # CANNOT latch any other checkpoint in that confused set.
+            track = self._det_track.get(id(best_gauge))
+            if is_valid and track is not None and self.gauge_confusion:
+                confused_classes = set(
+                    self.gauge_confusion.get("group") or self.gauge_confusion.get("pair") or []
+                )
+                if gauge_class in confused_classes:
+                    track_id = track.get("id")
+                    for other_cp_id, latched_tid in self._checkpoint_latched_track.items():
+                        if other_cp_id != cp_id and latched_tid == track_id:
+                            other_cfg = self._checkpoint_configs.get(other_cp_id, {})
+                            if other_cfg.get("gauge_class") in confused_classes:
+                                is_valid = False
+                                break
+
             if is_valid:
                 result.spatial_miss_count = 0
                 now = time.time()
@@ -2576,6 +3008,8 @@ class GaugeValidator:
                 result.dwell_progress = min(elapsed / self.ok_hold_seconds, 1.0)
                 if elapsed >= self.ok_hold_seconds:
                     result.status = GaugeStatus.OK
+                    if track is not None and "id" in track:
+                        self._checkpoint_latched_track[cp_id] = track["id"]
                     logger.info(
                         f"Checkpoint {result.name} → LATCHED OK after {elapsed:.1f}s "
                         f"(conf={result.confidence:.2f}, overlap={overlap:.3f})"
@@ -2583,6 +3017,11 @@ class GaugeValidator:
                 else:
                     result.status = GaugeStatus.UNCERTAIN
             else:
+                if self._track_movement and config.get("require_movement"):
+                    if still_at_rest or not is_valid:
+                        self._handle_missing(result, GaugeStatus.PENDING)
+                        continue
+
                 # A single noisy bbox must not wipe a nearly-complete dwell.
                 # Keep the timer for a few consecutive bad frames, then reset.
                 result.spatial_miss_count += 1
@@ -3199,6 +3638,10 @@ class GaugeValidator:
         return (x1 + x2) / 2, (y1 + y2) / 2
 
     @staticmethod
+    def _dist(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
+        return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+
+    @staticmethod
     def calculate_iou(box_a: List[int], box_b: List[int]) -> float:
         ax1, ay1, ax2, ay2 = box_a
         bx1, by1, bx2, by2 = box_b
@@ -3311,6 +3754,7 @@ class GaugeValidator:
         self._movement_tracks.clear()
         self._det_track.clear()
         self._frame_index = 0
+        self._checkpoint_latched_track.clear()
 
         # Keep the learned rest spots for components that may already be
         # installed when a new part appears (Outer Seal).  Hand-held gauges
@@ -3374,6 +3818,15 @@ class GaugeValidator:
         self.recent_logs.append(log)
         if len(self.recent_logs) > 50:
             self.recent_logs = self.recent_logs[-50:]
+
+        # ── MySQL database logging (non-blocking background write) ────────────
+        if _DB_LOGGER_AVAILABLE:
+            compound_status = 1 if result == "OK" else 0
+            _db_logger.log_inspection(
+                part_id=log.part_id,
+                compound_status=compound_status,
+                cycle_time_seconds=cycle_time,
+            )
 
         self.scanned_part_no = None
         logger.info(f"Inspection logged: {log.part_id} → {result_str} (Cycle: {log.cycle_time})")

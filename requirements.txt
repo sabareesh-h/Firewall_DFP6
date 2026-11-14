@@ -14,3 +14,8 @@ PyYAML>=6.0
 # Hardware & System Integration
 pynput>=1.7.6
 requests>=2.31.0
+
+# Database Logging (MSSQL via pyodbc & pymssql, plus MySQL compatibility)
+pyodbc>=5.0.0
+pymssql>=2.3.0
+pymysql>=1.1.0

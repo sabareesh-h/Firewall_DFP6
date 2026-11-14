@@ -11,10 +11,16 @@ Dataset/
 __pycache__/
 *.pyc
 *.exe
+*.msi
 .env
 venv/
 env/
 Software/
+
+# Local Data & Plant Sheets
+SQA/
+Database_xl.xlsx
+*.xlsx
 
 # Scratch & Temporary HTML
 r_files/

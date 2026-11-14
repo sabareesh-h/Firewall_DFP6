@@ -38,6 +38,7 @@ from camera import Camera
 from detection import YOLODetector
 from logic import GaugeValidator, classify_scan
 from scan_listener import ScanKeyListener
+import db_logger
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -272,6 +273,9 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=inference_loop, daemon=True).start()
     logger.info("Inference loop started.")
 
+    # ── Start MySQL database logger (non-blocking background worker) ──────────
+    db_logger.init()
+
     # Start WebSocket broadcast task
     broadcast_task = asyncio.create_task(ws_broadcast_loop())
 
@@ -280,6 +284,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     inference_running = False
     broadcast_task.cancel()
+    db_logger.shutdown()
     if scan_listener is not None:
         scan_listener.stop()
     if camera:

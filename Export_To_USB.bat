@@ -60,6 +60,22 @@ pip download torch torchvision --index-url https://download.pytorch.org/whl/cu12
 
 echo.
 echo ----------------------------------------------------------------------
+echo [2b/3] Copying MySQL Installer for offline IPC setup...
+echo (Download mysql-installer-community from mysql.com and place it in
+echo  this folder as "mysql-installer.msi" before running this export)
+echo ----------------------------------------------------------------------
+if exist "mysql-installer.msi" (
+    copy "mysql-installer.msi" "%dest_folder%\mysql-installer.msi"
+    echo   MySQL installer copied to USB.
+) else (
+    echo   [WARNING] mysql-installer.msi NOT found in this folder.
+    echo   Download MySQL Installer from: https://dev.mysql.com/downloads/installer/
+    echo   Save it as "mysql-installer.msi" next to Export_To_USB.bat, then re-run.
+    echo   The SOP software will still work without MySQL - DB logging will be disabled.
+)
+
+echo.
+echo ----------------------------------------------------------------------
 echo [3/3] Full export completed successfully!
 echo ----------------------------------------------------------------------
 goto finish
@@ -70,7 +86,7 @@ echo ----------------------------------------------------------------------
 echo Copying updated code and models to USB...
 echo ----------------------------------------------------------------------
 robocopy "SOP_Compliance" "%dest_folder%\SOP_Compliance" /E /XD __pycache__ .pytest_cache logs
-robocopy "." "%dest_folder%" requirements.txt Run_App.bat Setup_Offline.bat Update_From_USB.bat
+robocopy "." "%dest_folder%" requirements.txt Run_App.bat Setup_Offline.bat Update_From_USB.bat Setup_MySQL.bat
 if %ERRORLEVEL% GTR 7 (
     echo [ERROR] Failed copying update files to USB.
     pause
@@ -83,5 +99,10 @@ echo.
 echo ======================================================================
 echo  USB is ready! 
 echo  Safely eject the USB drive and plug it into the offline machine.
+echo.
+echo  On the IPC (one-time setup):
+echo    1. Run mysql-installer.msi  (if not already installed)
+echo    2. Run Setup_Offline.bat    (installs Python packages incl. pymysql)
+echo    3. Run Run_App.bat          (app creates the DB table automatically)
 echo ======================================================================
 pause

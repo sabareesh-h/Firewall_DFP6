@@ -159,6 +159,7 @@ class YOLODetector:
         return self._using_trt
         
     @property
+    
     def deadzone(self) -> Optional[List[int]]:
         return getattr(self, "_deadzone", None)
         
